@@ -12,6 +12,8 @@ Contexta Horizon helps you pick up earlier work by finding a short list of dated
 
 **macOS security:** The app is ad-hoc signed and **not Apple-notarized**. A matching checksum verifies the download against the release's checksum; it is not notarization. If macOS blocks the app, verify the source and leave the app unopened if your Mac's security policy does not allow it. Do not disable Gatekeeper or bypass the warning. If appropriate, review and build the source locally: with Apple's Command Line Tools installed, run `bash build.sh` from the extracted release source. It builds `dist/contexta-horizon.app`, generates the sample mailbox, and runs checks without installing the app.
 
+[Watch the 39-second walkthrough](https://github.com/AgentChiChi/contexta-horizon#contexta-horizon-for-mac) to see the built-in example and the separate copy-enabled mailbox preview.
+
 ## Start with the fictional example
 
 When Horizon has finished reading sources and there are no topics and nothing typed, click **Try a fictional example**. You'll see a made-up Harborline topic with dated file, chat, and mail titles in the same preview format as a real result. Opening the example doesn't read any source files or save or import anything. **Copy** is disabled. Click **Exit example** to return to the empty view. The example is not offered for a typed task with no match, and Aside lookup never returns it.

@@ -6,7 +6,11 @@
 
 macOS 13+ · Apple Silicon · **Public preview, ad-hoc signed and not Apple-notarized.** If your Mac blocks it, leave Gatekeeper enabled. See the [installation guide](GUIDE.md).
 
-![New chat. Same project. The actual 0.5.2 native window showing a fictional project, dated file, AI and mail references, and an Exit example button.](docs/media/horizon-v0.5.2.png)
+**Watch: New chat. Same project.** (39 seconds, sound off)
+
+https://github.com/user-attachments/assets/4b900293-a088-4993-8a61-5ab2aa388ffa
+
+[Download the MP4](https://raw.githubusercontent.com/AgentChiChi/contexta-horizon/main/docs/media/Horizon-0.5.2-Walkthrough.mp4) · [Try the fictional mailbox shown in the video](https://github.com/AgentChiChi/contexta-horizon/blob/v0.5.2/Demo/Harborline-Demo.mbox)
 
 ## “Did they approve the quote, or did we only send a draft?”
 
