@@ -1,7 +1,5 @@
 # Getting started with Contexta Horizon 0.5.1
 
-[한국어 가이드](GUIDE.ko.md)
-
 Contexta Horizon helps you pick up a task by finding a short list of dated references on your Mac. It shows titles and where they came from, not an AI-generated answer. Start with the fictional sample; you don't need to connect an account or import your own records.
 
 ## Install or upgrade

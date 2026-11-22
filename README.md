@@ -2,7 +2,7 @@
 
 **Pick up the work, not just the file.** Horizon is a Mac menu bar app that brings dated references from files, earlier AI chats and mail into one short preview. Use it to answer a familiar question: *Where did we leave this?*
 
-[Download for Apple Silicon](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/Contexta-Horizon-0.5.1-macOS-arm64.zip) · [Try the sample](GUIDE.md#try-it-with-fictional-mail) · [한국어 사용법](GUIDE.ko.md) · [Release notes](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.1)
+[Download for Apple Silicon](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/Contexta-Horizon-0.5.1-macOS-arm64.zip) · [Try the sample](GUIDE.md#try-it-with-fictional-mail) · [Release notes](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.1)
 
 **0.5.1 public preview** · Apple Silicon · macOS 13+ · Ad-hoc signed, **not Apple-notarized**. If your Mac blocks it, leave Gatekeeper on. See the [installation guide](GUIDE.md) or [build from source](#build-from-source).
 
@@ -37,7 +37,7 @@ That distinction is the point of Horizon: see **what you have evidence for**, an
 
 The standalone app reads the local metadata and snapshots you make available. It does not crawl all your accounts, run a background model or send a prompt to an AI provider. Choose the period and source types yourself. A handoff contains dated titles, not full document bodies. A title can still be sensitive; review it before copying or using the Aside integration.
 
-[English guide](GUIDE.md) · [한국어 가이드](GUIDE.ko.md) · [Watch the 33-second walkthrough of the original copy flow (0.4.1)](https://github.com/AgentChiChi/contexta-horizon/blob/v0.4.1/Horizon-Walkthrough.mp4) · [Verify your download](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/SHA256SUMS.txt)
+[English guide](GUIDE.md) · [Watch the 33-second walkthrough of the original copy flow (0.4.1)](https://github.com/AgentChiChi/contexta-horizon/blob/v0.4.1/Horizon-Walkthrough.mp4) · [Verify your download](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/SHA256SUMS.txt)
 
 ## Build from source
 

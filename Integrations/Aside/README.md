@@ -10,7 +10,7 @@ For ChatGPT or Claude, review the preview in Horizon, click **Copy**, and paste 
 
 ## Install or inspect the integration
 
-[Download the skill ZIP](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/Horizon-Aside-skill.zip) and follow the [English installation steps](../../GUIDE.md#optional-let-aside-find-earlier-work) or the [Korean guide](../../GUIDE.ko.md). You can inspect the [skill rules](horizon-resume/SKILL.md) and its [local helper](horizon-resume/scripts/lookup.mjs) before installing.
+[Download the skill ZIP](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/Horizon-Aside-skill.zip) and follow the [English installation steps](../../GUIDE.md#optional-let-aside-find-earlier-work). You can inspect the [skill rules](horizon-resume/SKILL.md) and its [local helper](horizon-resume/scripts/lookup.mjs) before installing.
 
 ### For scripts
 
