@@ -1,44 +1,45 @@
 # Contexta Horizon for Mac
 
-**Pick up the work, not just the file.** Horizon is a Mac menu bar app that brings dated references from files, earlier AI chats and mail into one short preview. Use it to answer a familiar question: *Where did we leave this?*
+**New chat. Same project.** Pick up the thread in ChatGPT, Claude or Aside without pasting your entire history. Horizon brings dated references from your local file lists, earlier AI chats and mail into one Mac menu bar preview. You decide which conversation gets them.
 
-[Download for Apple Silicon](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/Contexta-Horizon-0.5.1-macOS-arm64.zip) · [Try the sample](GUIDE.md#try-it-with-fictional-mail) · [Release notes](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.1)
+**[Download for Apple Silicon](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/Contexta-Horizon-0.5.2-macOS-arm64.zip)** · [Get started](GUIDE.md) · [0.5.2 release](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.2)
 
-**0.5.1 public preview** · Apple Silicon · macOS 13+ · Ad-hoc signed, **not Apple-notarized**. If your Mac blocks it, leave Gatekeeper on. See the [installation guide](GUIDE.md) or [build from source](#build-from-source).
+macOS 13+ · Apple Silicon · **Public preview, ad-hoc signed and not Apple-notarized.** If your Mac blocks it, leave Gatekeeper enabled. See the [installation guide](GUIDE.md).
 
-![Horizon’s actual native preview: a Harborline task and dated references, ready to review before copying. All records pictured are fictional.](docs/media/horizon-v0.5.1.png)
+![New chat. Same project. The actual 0.5.2 native window showing a fictional project, dated file, AI and mail references, and an Exit example button.](docs/media/horizon-v0.5.2.png)
 
-## The file is easy to find. The unfinished question isn't.
+## “Did they approve the quote, or did we only send a draft?”
 
-On Friday you revised a quote. On Monday the spreadsheet is right there, but did the supplier actually confirm delivery? In the fictional Harborline example, the workbook is one clue; an email titled **“Harborline quote: confirm the sample delivery date”** is another. Its title tells you which thread to check. It does **not** tell you the supplier said yes.
+Your new chat hasn't seen Friday's work. You could paste the whole thread, or give it the clues that matter: a workbook called *Harborline Q3 quote.xlsx*, an earlier chat titled *Harborline quote review notes*, and a mail subject that says *Harborline contract draft for review*. That last title is a reason to **check the reply**, not a reason to tell a customer the deal is signed.
 
-That distinction is the point of Horizon: see **what you have evidence for**, and decide what to do next.
+Horizon shows you the dates and source types. It doesn't read a contract and decide what happened. That's what makes the preview useful even if you never open an AI chat.
 
-## Try it without connecting an account
+## Try it before sharing anything
 
-1. Download the app above and the [fictional sample mailbox](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/sample-mail.mbox). The app starts empty if you have no local feeds.
-2. In **Sources & Settings → Import…**, choose `sample-mail.mbox`. Return to the simple view and type **“Follow up on the Harborline quote.”**
-3. Inspect the dates, titles and sources. Stop there, or click **Copy** and paste the preview into the chat you choose. If the sample looks empty, [adjust the period or regenerate it](GUIDE.md).
+1. Open Horizon on a fresh install. In the empty view with nothing typed, choose **Try a fictional example**. No sign-in, mailbox import or model needed for the demo.
+2. Inspect the Harborline references, then choose **Exit example**. The demo lives in memory. **Copy is off**, and the example doesn't become one of your projects.
+3. To try the actual handoff without personal data, import the [fictional mailbox](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/sample-mail.mbox) from **Sources & Settings → Import…**. Return to the simple view and type **“Follow up on the Harborline quote.”**
 
-### Bring the context to the conversation you already use
+### Two ways to resume work
 
-- **ChatGPT or Claude:** Review in Horizon, then copy and paste. No provider login, connector, or automatic sending from the app.
-- **Aside (optional):** Install the [account skill](Integrations/Aside/). Ask **“Where did we leave the Harborline quote?”** or **“지난번 견적 어디까지 했지?”** No wake word. When a lookup is needed, the references enter the current Aside chat and may be processed by its model. Say **“use only this chat”** to skip local lookup.
+**ChatGPT or Claude:** Review the real or imported references, click **Copy**, then paste them into the chat you choose. A useful next prompt:
 
-## What's better in 0.5.1
+> Using only these dated titles, tell me what was last documented, what is still unknown, and which record I should open before replying. Cite the title and date. Don't treat a request as confirmation.
 
-- **Less boilerplate when there's little to show.** Most one-to-three-record previews keep the dates and caveats without repeating the task. Small timing questions retain the fuller layout: the compact version made a test model invent a meeting time.
-- **Fewer copies of the same clue.** Replies and numbered revisions no longer get first claim on every citation slot. An older exception can surface beside a newer update.
-- **A request isn't a decision.** For status questions, wording that identifies a hold or a limit gets preference over routine titles like “approval agenda.” Titles remain references, never a verdict that work is complete.
+**Aside:** With the [optional account skill](Integrations/Aside/), ask **“Where did we leave the Harborline quote?”** There's no wake word. If a local lookup is needed, the references enter your current Aside chat and may be processed by its model. Use the manual Copy route if you want to inspect every title first.
 
-**What we measured:** On six held-out fictional cases, the selected titles contained **10 of 10** target references, up from **9 of 10**. The small local model still answered only **2 of 4** separate benchmark tasks correctly. Better evidence selection is not a promise of a better answer. [Results, misses and evaluation method →](VERIFICATION.md)
+## What changes when you turn a source off?
 
-## What stays on your Mac
+In 0.5.1, switching a source off filtered the result after the feeds were read. In **0.5.2**, a new lookup doesn't open a disabled file, chat or mail feed. Imports may mix chat and mail records, so the entire imports folder is skipped unless **Imports, AI chats and Mail** are all on. Skipped doesn't mean empty. Explicit imports and Mail collection are separate actions. [Details and limits](GUIDE.md#what-a-source-switch-does)
 
-The standalone app reads the local metadata and snapshots you make available. It does not crawl all your accounts, run a background model or send a prompt to an AI provider. Choose the period and source types yourself. A handoff contains dated titles, not full document bodies. A title can still be sensitive; review it before copying or using the Aside integration.
+## What we tested
 
-[English guide](GUIDE.md) · [Watch the 33-second walkthrough of the original copy flow (0.4.1)](https://github.com/AgentChiChi/contexta-horizon/blob/v0.4.1/Horizon-Walkthrough.mp4) · [Verify your download](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/SHA256SUMS.txt)
+- **16 switch combinations:** with every source off, no source file was checked or opened and the imports directory wasn't listed. With only AI on, the reader opened the AI feed and the shared collection manifest, not the file or mail feeds.
+- **81 switch-off transitions:** cached evidence matched a fresh read every time. Previously loaded mixed imports didn't linger in the results.
+- **32 queries against the installed app:** fictional demo records never appeared in a lookup. Opening and exiting the demo changed no fixture files, preferences or clipboard in the native-window test.
 
-## Build from source
+These are **source-control and isolation tests**, not model accuracy scores. The four earlier benchmark handoffs stayed byte-identical. In the earlier local-model run, correct final answers were **2 of 4**; we do not claim that 0.5.2 improves that score or reduces your API bill. [Verification and reproducible checks](VERIFICATION.md)
 
-With Apple Command Line Tools installed, run `bash build.sh` from the repository root. It builds `dist/contexta-horizon.app` and checks synthetic fixtures. It does not install the app. No open-source license has been granted.
+### Build from source
+
+With Apple Command Line Tools installed, run `bash build.sh` from the repository root. The script builds `dist/contexta-horizon.app` and runs synthetic checks; it doesn't install the app. No open-source license has been granted.

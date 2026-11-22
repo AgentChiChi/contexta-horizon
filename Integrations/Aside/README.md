@@ -1,24 +1,37 @@
 # Resume your work in Aside
 
-Ask **“Where did we leave the Harborline quote?”** or **“샘플 실증 어디까지 했지?”** You do not need to say Horizon or use a command. With one clear project already in the conversation, **“그 견적 다시 보자”** works too. If the current chat already contains the answer, Aside uses that instead of looking up local records.
+**Optional integration for Contexta Horizon public preview v0.5.2 (build 8).** You can use Horizon with ChatGPT, Claude, or Aside without installing this skill: choose your own records in Horizon, review the preview, click **Copy**, and paste it into the conversation you choose. No provider account connection is required for that flow.
 
-**“다시”** alone retries the current task, not the work index. Ordinary questions and web searches are not lookups. Say **“이 대화만 보고 답해”** or **“use only this chat”** to rule out lookup. If it is unclear which previous work item you mean, Aside asks rather than scanning unrelated projects.
+## Install the skill
 
-This account skill requires Node.js and the Horizon 0.5.1 Mac app at `~/Applications/contexta-horizon.app`. When used, a short topic goes to the local app. Its dated reference titles enter the current Aside chat and may be processed by the chat's model. It does not read source document bodies, write to the clipboard, or send anything to another app. Horizon's date and source settings still apply.
+1. Install [Contexta Horizon v0.5.2](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.2) at `~/Applications/contexta-horizon.app`. The helper looks in your home Applications folder, not `/Applications`. Follow the [guide's installation and macOS safety steps](../../GUIDE.md#install-or-upgrade). Run `node --version`; if Node.js is missing, install a supported Node.js LTS release.
+2. Download [Horizon-Aside-skill.zip](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/Horizon-Aside-skill.zip). Compare its SHA-256 with the entry in [SHA256SUMS.txt](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/SHA256SUMS.txt) before extracting. Copy the `horizon-resume` folder into `skills/user` in the root of your active Aside account. Keep `SKILL.md` and `scripts/lookup.mjs` together in that folder, with no extra archive folder in between. Open a new Aside chat. To check installation without looking up your records, ask whether `horizon-resume` is available.
 
-For ChatGPT or Claude, review the preview in Horizon, click **Copy**, and paste it into the chat you choose. No provider account connection is required.
+You can inspect the [skill rules](horizon-resume/SKILL.md) and [local helper](horizon-resume/scripts/lookup.mjs) before installing.
 
-## Install or inspect the integration
+## Ask about earlier work
 
-[Download the skill ZIP](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.1/Horizon-Aside-skill.zip) and follow the [English installation steps](../../GUIDE.md#optional-let-aside-find-earlier-work). You can inspect the [skill rules](horizon-resume/SKILL.md) and its [local helper](horizon-resume/scripts/lookup.mjs) before installing.
+Ask **“Where did we leave the Harborline quote?”** No wake word or command is needed. **“Let's revisit that quote”** can work if the current chat points to one clear project. If the answer is already in the chat, Aside uses it instead of looking up records. If your project is unclear, Aside asks which one you mean. A bare **“try again”**, rewriting a visible draft, or a web search doesn't trigger lookup. Say **“Use only this chat”** to rule it out.
 
-### For scripts
+The built-in **Try a fictional example** preview is only for the Horizon window: **Copy** is disabled, and Aside can't retrieve it. For a fictional lookup you can share, [import the sample mailbox](../../GUIDE.md#optional-practice-with-a-sample-mailbox) first, or use your own selected records.
 
-The same executable can return a single top match without opening a window or writing to the clipboard:
+## Scope and privacy
+
+The skill sends a short topic query, not the entire conversation, to the local Horizon app. Lookup uses Horizon's saved period and source settings. Imports are opened only while **Imports**, **AI chats**, and **Mail** are all on. With every source switch off, there are no source reads and lookup reports unavailable. See [what each source switch does](../../GUIDE.md#what-a-source-switch-does).
+
+If there is a match, dated reference text goes into the **current Aside chat** and may be processed by its model. It doesn't copy to the clipboard, send to a separate app, or open original documents. Titles can be sensitive and aren't proof of a decision or completed work. Use Horizon's manual **Copy** flow if you want to review the exact text before sharing it.
+
+## Troubleshooting
+
+Try the same named project in Horizon first. If it appears there but Aside doesn't find it, check the home Applications path, Node.js, and the skill path in your active account, then try in a new chat. If lookup is unavailable, check whether an enabled source is readable and nonempty. If there's no match, check the query and selected date range. A lookup doesn't automatically widen its scope.
+
+## For scripts
+
+The app executable can return a single top match without opening a window or writing to the clipboard:
 
 ```sh
 printf '%s' '{"query":"Follow up on the Harborline quote"}' | \
   "$HOME/Applications/contexta-horizon.app/Contents/MacOS/ContextaHorizon" --aside-lookup
 ```
 
-Input is one JSON object on stdin (maximum 8 KiB). Check `schema: horizon.aside.v1` and `status`: `matched` returns the handoff, `no_match`, `unavailable` and `invalid` return an empty handoff. A matched handoff uses the same dated preview as the app, with the current source and period settings. Do not log it if the titles are sensitive.
+Send one UTF-8 JSON object with a single nonempty `query` string on stdin (maximum 8 KiB). Check `schema` for `horizon.aside.v1` and inspect `status`: `matched` returns the same handoff as the top preview in Horizon for that query. `no_match`, `unavailable`, and `invalid` return an empty `handoff`. Don't log the handoff if the titles are sensitive.

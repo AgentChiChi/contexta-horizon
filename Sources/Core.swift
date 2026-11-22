@@ -443,9 +443,15 @@ struct Manifest {
 }
 
 enum Reader {
+    /// For the tests only: called at the two places where reading actually reaches for the disk — just before a file
+    /// is looked at (its lstat, and the open and read that may follow), and just before the imports folder is looked
+    /// for and listed. Every source file and the manifest are read through these two places. Nothing in the app sets it.
+    static var probe: ((_ what: String, _ path: String) -> Void)?
+
     /// A regular file only (not a link, not a folder), at most `max` bytes. Larger files are read up to the limit and
     /// reported as cut.
     static func regularFile(_ url: URL, max: Int) -> (data: Data?, problem: String?, missing: Bool, cut: Bool, modified: Date?) {
+        probe?("file", url.path)
         var st = stat()
         guard lstat(url.path, &st) == 0 else { return (nil, errno == ENOENT ? "file not found" : "cannot be read (permission)", errno == ENOENT, false, nil) }
         let type = st.st_mode & S_IFMT
@@ -466,6 +472,9 @@ enum Reader {
         var missing = false
         var problem: String?
         var modified: Date?
+        /// Not read at all — nothing was looked for, listed or opened: its switch is off, or (imports) AI chats or Mail
+        /// is off. Not the same as missing or empty: whether there is anything is simply not known.
+        var gated = false
     }
 
     /// JSON lines, each parsed on its own; a line that is too long, not JSON or not the expected shape is skipped and
@@ -530,8 +539,11 @@ enum Reader {
     }
 
     /// The import files, oldest first; a record whose id was already seen in an earlier file is not read twice.
+    /// Called only while Imports, AI chats and Mail are all on (see Snapshot.read): an import file may hold AI and mail
+    /// rows together, and only reading a row tells which it is.
     static func imports(_ places: Places) -> (loaded: Loaded, files: Int) {
         var out = Loaded(), files = 0
+        probe?("folder", places.imports.path)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: places.imports.path, isDirectory: &isDir), isDir.boolValue else { out.missing = true; return (out, 0) }
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: places.imports.path)) ?? []).filter { $0.hasSuffix(".jsonl") && !$0.hasPrefix(".") }.sorted().prefix(500)
@@ -571,6 +583,7 @@ struct SourceCoverage {
     /// here (a collected feed, or snapshots of exports), when it was collected, and whether it was read only in part.
     var summary: String {
         if !enabled { return "Off — not used in the results" }
+        if loaded.gated { return "Skipped, not opened — an import file can mix AI chat and mail records, so none is opened while AI chats or Mail is off (this says nothing about whether anything was imported)" }
         var parts: [String] = []
         if loaded.missing { return kind == .imports ? "Nothing imported yet" : "No data — the file does not exist (not the same as 0 records)" }
         if let p = loaded.problem { return "Not read — " + p }
@@ -600,17 +613,54 @@ struct Snapshot {
     var importFiles = 0
     var manifest = Manifest()
     var readAt = Date()
+    /// The switches this snapshot was read for. A source that was off then is not in it and was not opened.
+    var readFor = Set(SourceKind.allCases)
 
-    static func read(_ places: Places, now: Date = Date()) -> Snapshot {
-        var s = Snapshot(); s.readAt = now
-        s.manifest = Manifest.read(places.manifest)
-        let files = Reader.load(places.preindex, row: Reader.fileRow)
-        let ai = Reader.load(places.ai, row: Reader.evidenceRow(.ai, .ai))
-        let mail = Reader.load(places.mail, row: Reader.evidenceRow(.mail, .mail))
-        let imports = Reader.imports(places)
+    /// Reads what the switches allow, and nothing else — the switches decide what is opened, not only what is shown:
+    ///  • Files, AI chats, Mail: each has its own feed file, which is not looked at, opened or read while its switch is off;
+    ///  • Imports: import files hold AI chat and mail records, possibly both in one file, and neither a file's name
+    ///    nor its format says which without reading its rows. So the imports folder is not looked for, listed or
+    ///    opened unless Imports, AI chats and Mail are all three on. With any of them off the imports are skipped
+    ///    whole — a mail record is never read from disk behind a Mail switch that is off, nor an AI one behind AI chats;
+    ///  • the manifest (when the three feeds were collected) is read only while at least one of those feeds is on;
+    ///  • with every switch off nothing at all is opened.
+    static func read(_ places: Places, enabled: Set<SourceKind> = Set(SourceKind.allCases), now: Date = Date()) -> Snapshot {
+        var s = Snapshot(); s.readAt = now; s.readFor = enabled
+        var off = Reader.Loaded(); off.gated = true
+        func feed(_ kind: SourceKind, _ read: () -> Reader.Loaded) -> Reader.Loaded { enabled.contains(kind) ? read() : off }
+        if !enabled.isDisjoint(with: [.files, .ai, .mail]) { s.manifest = Manifest.read(places.manifest) }
+        let files = feed(.files) { Reader.load(places.preindex, row: Reader.fileRow) }
+        let ai = feed(.ai) { Reader.load(places.ai, row: Reader.evidenceRow(.ai, .ai)) }
+        let mail = feed(.mail) { Reader.load(places.mail, row: Reader.evidenceRow(.mail, .mail)) }
+        let imports = Snapshot.readsImports(enabled) ? Reader.imports(places) : (loaded: off, files: 0)
         s.importFiles = imports.files
         s.coverage = [.files: files, .ai: ai, .mail: mail, .imports: imports.loaded]
         s.evidence = files.rows + ai.rows + mail.rows + imports.loaded.rows
+        return s
+    }
+
+    /// Imports are read only while Imports, AI chats and Mail are all on.
+    static func readsImports(_ enabled: Set<SourceKind>) -> Bool { enabled.isSuperset(of: [.imports, .ai, .mail]) }
+
+    /// Does this snapshot hold everything these switches ask for? (If not, what is newly on has to be read.)
+    func covers(_ enabled: Set<SourceKind>) -> Bool { enabled.isSubset(of: readFor) }
+
+    /// The same snapshot without anything a switch now excludes — used the moment a switch is turned off, so that
+    /// records of a source or type that is off are not kept in memory. Reads nothing.
+    func restricted(to enabled: Set<SourceKind>) -> Snapshot {
+        var s = self
+        s.readFor = readFor.intersection(enabled)
+        var off = Reader.Loaded(); off.gated = true
+        for kind in SourceKind.allCases {
+            guard var l = coverage[kind], !l.gated else { continue }
+            let gone = kind == .imports ? !Snapshot.readsImports(enabled) : !enabled.contains(kind)
+            if gone { s.coverage[kind] = off; if kind == .imports { s.importFiles = 0 }; continue }
+            l.rows = l.rows.filter { $0.isOn(enabled) }
+            s.coverage[kind] = l
+        }
+        let keepImports = Snapshot.readsImports(enabled)                        // imports stay only while Imports, AI chats and Mail are all on
+        s.evidence = evidence.filter { $0.isOn(enabled) && ($0.origin != .imports || keepImports) }
+        if enabled.isDisjoint(with: [.files, .ai, .mail]) { s.manifest = Manifest() }
         return s
     }
 
@@ -884,6 +934,7 @@ enum Export {
     static func caption(_ coverage: [SourceCoverage]) -> String? {
         var notes: [String] = []
         for c in coverage where c.enabled {
+            if c.loaded.gated { notes.append(c.kind.label + ": skipped"); continue }          // on, but not opened (imports while AI chats or Mail is off)
             var flags: [String] = []
             if c.loaded.missing && c.kind != .imports { flags.append("no data") }
             if c.loaded.problem != nil && !c.loaded.missing { flags.append("not read") }
@@ -1290,7 +1341,7 @@ enum AsideLookup {
     }
 
     static func state(_ c: SourceCoverage) -> String {
-        if !c.enabled { return "off" }
+        if !c.enabled || c.loaded.gated { return "off" }
         if c.loaded.missing { return c.kind == .imports ? "empty" : "missing" }
         if c.loaded.problem != nil { return "unreadable" }
         return c.loaded.rows.isEmpty ? "empty" : "ok"
@@ -1300,10 +1351,16 @@ enum AsideLookup {
     static func answer(input: Data, places: Places, preferences: Preferences, now: Date = Date()) -> Answer {
         let parsed = parse(input)
         guard let query = parsed.query else { return Answer(status: .invalid, reason: parsed.reason) }
-        let v = view(Snapshot.read(places, now: now), preferences: preferences, now: now)
+        let enabled = preferences.enabled
+        if enabled.isEmpty {                                          // every switch is off: answered without opening anything, not even the manifest
+            var off: [String: String] = [:]
+            for k in SourceKind.allCases { off[k.rawValue] = "off" }
+            return Answer(status: .unavailable, reason: "all_sources_off", sources: off)
+        }
+        let v = view(Snapshot.read(places, enabled: enabled, now: now), preferences: preferences, now: now)      // only what the switches allow is opened
         var sources: [String: String] = [:]
         for c in v.coverage { sources[c.kind.rawValue] = state(c) }
-        let on = v.coverage.filter { $0.enabled }
+        let on = v.coverage.filter { $0.enabled && !$0.loaded.gated }
         if on.isEmpty { return Answer(status: .unavailable, reason: "all_sources_off", sources: sources) }
         if !on.contains(where: { state($0) == "ok" }) {
             let why = on.contains { state($0) == "unreadable" } ? "sources_unreadable" : (on.contains { state($0) == "missing" } ? "sources_missing" : "no_records")

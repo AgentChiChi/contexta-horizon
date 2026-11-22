@@ -8,6 +8,28 @@
 
 import AppKit
 
+/// "Try a fictional example": one made-up topic, built in memory when the person asks for it on the empty screen and
+/// dropped when they leave it. It exists only inside this window: nothing of it is read from or written to a file,
+/// the index, the settings or the clipboard, it is never mixed with real records, and the headless lookup (which
+/// lives in Core.swift and knows nothing of this file) cannot return it. Its text is made by the same Export.simple
+/// as every real preview.
+struct FictionalExample {
+    let topics: [TopicSummary]
+    let window: HorizonWindow
+    static let key = "harborline"
+
+    static func make(now: Date = Date()) -> FictionalExample {
+        let rows: [(String, Double, RecordType)] = [("Harborline Q3 quote.xlsx", 3, .file), ("Harborline delivery plan.pdf", 12, .file),
+                                                    ("Harborline quote review notes", 5, .ai), ("Harborline pricing questions", 20, .ai),
+                                                    ("Re: Harborline quote revision", 2, .mail), ("Harborline contract draft for review", 8, .mail)]
+        let window = HorizonWindow(months: 3, now: now)
+        let evidence = rows.enumerated().map { i, r in
+            Evidence(origin: r.2.governing, type: r.2, id: "fictional-example-\(i)", title: r.0, date: now.addingTimeInterval(-r.1 * 86400), dayOnly: true, source: "Fictional example", topics: ["Harborline"], locator: "", importedAt: nil, via: "feed")
+        }
+        return FictionalExample(topics: Analysis.topics(evidence, window: window, enabled: Set(SourceKind.allCases)), window: window)
+    }
+}
+
 final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private let dashboard: HorizonController
     private let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 560), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -20,6 +42,11 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
     private let status = SimpleController.label("", size: 12, color: .secondaryLabelColor)
     private let advanced = NSButton(title: "Sources & Settings", target: nil, action: nil)
+    // The fictional example: offered only on the empty screen, and its own banner with the way out. Hidden otherwise.
+    private let exampleOffer = NSButton(title: "Try a fictional example", target: nil, action: nil)
+    private let exampleBanner = NSStackView()
+    private let exampleExit = NSButton(title: "Exit example", target: nil, action: nil)
+    private var example: FictionalExample?
 
     private var candidates: [TopicSummary] = []
     private var pickedKey: String?
@@ -69,8 +96,20 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         let box = NSBox(); box.boxType = .custom; box.cornerRadius = 8; box.borderWidth = 1; box.borderColor = .separatorColor; box.fillColor = .textBackgroundColor
         box.contentViewMargins = .zero; box.titlePosition = .noTitle
         scroller.translatesAutoresizingMaskIntoConstraints = false; emptyNote.translatesAutoresizingMaskIntoConstraints = false
-        let inner = NSView(); inner.addSubview(scroller); inner.addSubview(emptyNote)
+        let inner = NSView(); inner.addSubview(scroller); inner.addSubview(emptyNote); inner.addSubview(exampleOffer)
         emptyNote.alignment = .center
+        exampleOffer.target = self; exampleOffer.action = #selector(tryExample); exampleOffer.bezelStyle = .rounded; exampleOffer.isHidden = true
+        exampleOffer.toolTip = "Shows one made-up topic so you can see what a result looks like. Nothing is read, saved or copied."
+        exampleOffer.translatesAutoresizingMaskIntoConstraints = false
+        exampleOffer.centerXAnchor.constraint(equalTo: inner.centerXAnchor).isActive = true
+        exampleOffer.topAnchor.constraint(equalTo: emptyNote.bottomAnchor, constant: 14).isActive = true
+        let bannerText = SimpleController.label("Fictional example — made-up Harborline records. Nothing here is from your Mac, and nothing is saved or copied.", size: 12, color: .labelColor, weight: .medium)
+        exampleExit.target = self; exampleExit.action = #selector(exitExample); exampleExit.bezelStyle = .rounded; exampleExit.controlSize = .small
+        exampleExit.setContentHuggingPriority(.required, for: .horizontal); exampleExit.setContentCompressionResistancePriority(.required, for: .horizontal)
+        exampleBanner.orientation = .horizontal; exampleBanner.spacing = 10; exampleBanner.alignment = .centerY
+        exampleBanner.addArrangedSubview(bannerText); exampleBanner.addArrangedSubview(exampleExit)
+        exampleBanner.isHidden = true
+        exampleBanner.setAccessibilityLabel("Fictional example")
         NSLayoutConstraint.activate([scroller.leadingAnchor.constraint(equalTo: inner.leadingAnchor), scroller.trailingAnchor.constraint(equalTo: inner.trailingAnchor), scroller.topAnchor.constraint(equalTo: inner.topAnchor), scroller.bottomAnchor.constraint(equalTo: inner.bottomAnchor),
                                      emptyNote.centerYAnchor.constraint(equalTo: inner.centerYAnchor), emptyNote.leadingAnchor.constraint(equalTo: inner.leadingAnchor, constant: 28), emptyNote.trailingAnchor.constraint(equalTo: inner.trailingAnchor, constant: -28)])
         box.contentView = inner
@@ -86,14 +125,14 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let bottom = NSStackView(views: [copyButton, status, spacer, advanced]); bottom.orientation = .horizontal; bottom.spacing = 10; bottom.alignment = .centerY
 
-        let stack = NSStackView(views: [title, field, hint, suggestionRow, box, caption, bottom])
+        let stack = NSStackView(views: [title, field, hint, suggestionRow, exampleBanner, box, caption, bottom])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         stack.setCustomSpacing(14, after: title); stack.setCustomSpacing(6, after: field); stack.setCustomSpacing(12, after: suggestionRow); stack.setCustomSpacing(6, after: box); stack.setCustomSpacing(14, after: caption)
         stack.edgeInsets = NSEdgeInsets(top: 24, left: 26, bottom: 20, right: 26)
         stack.translatesAutoresizingMaskIntoConstraints = false
         let content = NSView(); content.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: content.leadingAnchor), stack.trailingAnchor.constraint(equalTo: content.trailingAnchor), stack.topAnchor.constraint(equalTo: content.topAnchor), stack.bottomAnchor.constraint(equalTo: content.bottomAnchor)])
-        for v in [field, box, bottom, hint, caption] as [NSView] { v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -52).isActive = true }
+        for v in [field, box, bottom, hint, caption, exampleBanner] as [NSView] { v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -52).isActive = true }
         box.setContentHuggingPriority(.defaultLow, for: .vertical)
         window.contentView = content
         refresh()
@@ -101,7 +140,7 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
 
     /// Shows the screen with the keyboard in the field. `pick` chooses a topic (from the dashboard's "Open in simple view").
     func show(pick: String? = nil) {
-        if let key = pick { pickedKey = key; field.stringValue = "" }
+        if let key = pick { example = nil; pickedKey = key; field.stringValue = "" }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.makeFirstResponder(field)
@@ -114,11 +153,12 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     /// Works out the suggestions and the one topic whose handoff is shown, from what is typed and what was picked.
     /// With nothing typed and nothing picked, or with no match, there is no preview and Copy is off.
     func refresh() {
-        let topics = dashboard.currentTopics
+        if example != nil, !dashboard.currentTopics.isEmpty { example = nil; pickedKey = nil }       // real records are in view: the example is over
+        let topics = example?.topics ?? dashboard.currentTopics
         let query = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         var chosen: TopicSummary?
         candidates = []
-        if !dashboard.isLoaded {
+        if example == nil, !dashboard.isLoaded {
             hint.stringValue = "Reading your sources…"
             emptyNote.stringValue = ""
         } else if topics.isEmpty {
@@ -134,7 +174,7 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
             candidates = Search.rank(query, topics: topics).map { $0.topic }
             if candidates.isEmpty {
                 hint.stringValue = "No matching topic was found."
-                emptyNote.stringValue = "No topic matches “" + Redact.label(query, max: 40) + "”.\nTry other words, or check the period and sources in Sources & Settings."
+                emptyNote.stringValue = "No topic matches “" + Redact.label(query, max: 40) + "”.\n" + (example == nil ? "Try other words, or check the period and sources in Sources & Settings." : "The example has one made-up topic, Harborline.")
             } else {
                 chosen = candidates.first { $0.key == pickedKey } ?? candidates[0]
                 hint.stringValue = candidates.count == 1 ? "Matching topic" : "\(candidates.count) matching topics — press another to switch"
@@ -152,13 +192,19 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
             suggestionRow.addArrangedSubview(b)
         }
         suggestionRow.isHidden = candidates.isEmpty
-        shownText = chosen.map { Export.simple(task: query, topic: $0, window: dashboard.currentWindow, coverage: dashboard.currentCoverage) } ?? ""
+        // The example is made by the same formatter as a real preview, from its own records and period and no coverage of any real source.
+        shownText = chosen.map { Export.simple(task: query, topic: $0, window: example?.window ?? dashboard.currentWindow, coverage: example == nil ? dashboard.currentCoverage : []) } ?? ""
         preview.string = shownText
         emptyNote.isHidden = !shownText.isEmpty
-        copyButton.isEnabled = !shownText.isEmpty
-        status.stringValue = ""
+        copyButton.isEnabled = !shownText.isEmpty && example == nil                                  // nothing of the example can be copied with the button
+        status.stringValue = example == nil ? "" : "Copy is off in the example."
         let note = Export.caption(dashboard.currentCoverage)
-        caption.stringValue = !dashboard.isLoaded ? "" : "Period: " + dashboard.currentWindow.dayLabel + (note.map { " · Source caution: " + $0 } ?? "") + " · Titles and dates only"
+        caption.stringValue = example != nil ? "Fictional example · not your records · nothing is read, saved or copied" : (!dashboard.isLoaded ? "" : "Period: " + dashboard.currentWindow.dayLabel + (note.map { " · Source caution: " + $0 } ?? "") + " · Titles and dates only")
+        // The offer exists only on the empty screen with nothing typed (records were read and there is no topic at all) —
+        // never while a task is typed, and never for a task that merely finds no match.
+        exampleOffer.isHidden = !(example == nil && dashboard.isLoaded && dashboard.currentTopics.isEmpty && query.isEmpty)
+        exampleBanner.isHidden = example == nil
+        window.title = example == nil ? "Contexta Horizon" : "Contexta Horizon — fictional example"
     }
 
     // MARK: actions
@@ -169,7 +215,7 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard commandSelector == #selector(NSResponder.insertNewline(_:)) else { return false }
         refresh()
-        if !shownText.isEmpty { status.stringValue = "Topic chosen. Press Copy to copy it." }
+        if !shownText.isEmpty, example == nil { status.stringValue = "Topic chosen. Press Copy to copy it." }
         return true
     }
 
@@ -181,8 +227,25 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
 
     @objc private func openAdvanced() { dashboard.show() }
 
+    /// Enters the fictional example: made in memory now, with its one topic chosen so the result is seen at once.
+    @objc private func tryExample() {
+        guard example == nil, dashboard.isLoaded, dashboard.currentTopics.isEmpty, field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        example = FictionalExample.make()
+        pickedKey = FictionalExample.key; field.stringValue = ""
+        refresh()
+        window.makeFirstResponder(field)
+    }
+
+    /// Leaves it: the example is dropped and the screen is the empty one again.
+    @objc private func exitExample() {
+        example = nil; pickedKey = nil; field.stringValue = ""
+        refresh()
+        window.makeFirstResponder(field)
+    }
+
     /// The only place the clipboard is written: this button, with exactly the text the preview is showing.
     @objc private func copyShown() {
+        guard example == nil else { return }                          // the fictional example is never copied
         guard copyButton.isEnabled, !shownText.isEmpty, preview.string == shownText else { return }
         let board = NSPasteboard.general
         board.clearContents()
@@ -200,11 +263,18 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     /// Presses Copy only when it is disabled, to show that nothing happens (an enabled press would write the real clipboard).
     func smokePressCopyWhileDisabled() { if !copyButton.isEnabled { copyShown() } }
     func smokeOpenAdvanced() { openAdvanced() }
+    /// Presses the example's two buttons as a click would (each does nothing when its button is not on screen).
+    func smokeTryExample() { if !exampleOffer.isHidden { tryExample() } }
+    /// Calls the action itself even while its button is hidden, to show that its own guard refuses.
+    func smokeForceTryExample() { tryExample() }
+    func smokeExitExample() { if !exampleBanner.isHidden { exitExample() } }
     func smokeState() -> [String] {
         ["simple.title=" + window.title, "simple.fieldFocused=\(window.firstResponder === field.currentEditor() || window.firstResponder === field)", "simple.query=" + field.stringValue, "simple.hint=" + hint.stringValue,
          "simple.suggestions=" + suggestionRow.arrangedSubviews.compactMap { ($0 as? NSButton).map { $0.title + ($0.bezelColor != nil ? "*" : "") } }.joined(separator: " | "),
          "simple.copyEnabled=\(copyButton.isEnabled)", "simple.copyCount=\(copyCount)", "simple.status=" + status.stringValue, "simple.caption=" + caption.stringValue,
-         "simple.empty=" + (emptyNote.isHidden ? "" : emptyNote.stringValue.replacingOccurrences(of: "\n", with: " ")), "simple.preview=" + preview.string]
+         "simple.empty=" + (emptyNote.isHidden ? "" : emptyNote.stringValue.replacingOccurrences(of: "\n", with: " ")),
+         "simple.exampleOffer=" + (exampleOffer.isHidden ? "hidden" : exampleOffer.title), "simple.exampleBanner=" + (exampleBanner.isHidden ? "hidden" : (exampleBanner.arrangedSubviews.first as? NSTextField)?.stringValue ?? "") + (exampleBanner.isHidden ? "" : " [" + exampleExit.title + "]"),
+         "simple.example=\(example != nil)", "simple.preview=" + preview.string]
     }
 }
 

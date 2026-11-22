@@ -69,6 +69,10 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
     private var topics: [TopicSummary] = []
     private var selected: TopicSummary?
     private var busy = false
+    private var reads = 0                               // the number of the latest read asked for
+    private var readingFor: Set<SourceKind>?            // the switches the read under way was asked for
+    private var staleReads = 0                          // answers that arrived after a later request and were dropped
+    private var afterRead: String?                      // an import's or collection's result, kept in the status line after the read that follows
     /// Called after each read (used by the synthetic window smoke test).
     var onRead: (() -> Void)?
     /// Called whenever the topics, the period or the coverage changed (the simple screen follows).
@@ -266,27 +270,46 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         recompute()
     }
 
+    /// A switch decides what is read, not only what is shown. Turned off: what it excludes leaves the snapshot in
+    /// memory at once and nothing is read. Turned on: what is newly allowed has to be read, so a read is started —
+    /// unless the read already under way was asked for with these switches.
     @objc private func sourceToggled(_ sender: NSButton) {
         let kind = SourceKind.allCases[sender.tag]
         preferences.set(kind, sender.state == .on)
-        recompute()
+        let enabled = preferences.enabled
+        snapshot = snapshot?.restricted(to: enabled)
+        let have = busy ? readingFor : snapshot?.readFor
+        if let have = have, !enabled.isSubset(of: have) { reread(nil) } else { recompute() }
     }
 
+    /// Reads what the switches allow at this moment (Snapshot.read opens nothing else). Each request gets a number;
+    /// when its answer arrives and a later request exists, the answer is stale and dropped unseen. A switch turned
+    /// off while reading is applied to the answer before it is kept, so nothing excluded is ever cached.
     @objc func reread(_ sender: Any?) {
-        guard !busy else { return }
-        busy = true; statusLabel.stringValue = "Rereading sources…"
-        let places = self.places
+        reads += 1
+        let request = reads, places = self.places, enabled = preferences.enabled
+        busy = true; readingFor = enabled; statusLabel.stringValue = "Rereading sources…"
         DispatchQueue.global(qos: .userInitiated).async {
-            let snap = Snapshot.read(places)
+            let snap = Snapshot.read(places, enabled: enabled)
             DispatchQueue.main.async {
-                self.busy = false
-                self.snapshot = snap
-                self.statusLabel.stringValue = "Sources reread: " + Dates.minute(snap.readAt) + (snap.manifest.problem.map { " · manifest: " + $0 } ?? "")
+                guard request == self.reads else { self.staleReads += 1; return }
+                self.busy = false; self.readingFor = nil
+                self.snapshot = snap.restricted(to: self.preferences.enabled)
+                self.statusLabel.stringValue = (self.afterRead.map { $0 + " · " } ?? "") + "Sources reread: " + Dates.minute(snap.readAt) + (snap.manifest.problem.map { " · manifest: " + $0 } ?? "")
+                self.afterRead = nil
                 self.recompute()
                 self.updateTool()
                 self.onRead?()
             }
         }
+    }
+
+    /// What an import or a Mail collection reported, with a word when a switch keeps the new records out of view.
+    /// Importing and collecting are the person's own actions and are never held back by a switch.
+    private func keepForStatus(_ message: String) {
+        let hidden = [SourceKind.imports, .ai, .mail].filter { !preferences.isOn($0) }.map { $0.label }      // imports are read only while all three are on
+        afterRead = message + (hidden.isEmpty ? "" : " (not shown while " + hidden.joined(separator: " and ") + (hidden.count == 1 ? " is" : " are") + " switched off)")
+        statusLabel.stringValue = afterRead ?? message
     }
 
     /// For the synthetic window smoke test: what the window shows now, and selecting a topic row as a click would.
@@ -295,6 +318,12 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
     func smokeApplyCustom(start: Date, end: Date) { months.selectedSegment = 2; customRow.isHidden = false; startPicker.maxDate = nil; endPicker.maxDate = nil; startPicker.dateValue = start; endPicker.dateValue = end; applyCustom() }
     func smokeChoosePreset(_ segment: Int) { months.selectedSegment = segment; monthsChanged() }
     func smokeUseInSimple() { useInSimple() }
+    /// Clicks a source switch as a person would; presses "Reread Sources"; and what the reads came to.
+    func smokeToggle(_ kind: SourceKind, _ on: Bool) { if let c = sourceChecks[kind] { c.state = on ? .on : .off; sourceToggled(c) } }
+    func smokeReread() { reread(nil) }
+    var smokeReads: (asked: Int, stale: Int, busy: Bool) { (reads, staleReads, busy) }
+    /// What is held in memory right now, by where it came from and by record type (nothing excluded may be here).
+    var smokeHeld: String { guard let s = snapshot else { return "none" }; return SourceKind.allCases.map { k in "\(k.rawValue):\(s.evidence.filter { $0.origin == k }.count)" }.joined(separator: " ") + " | " + RecordType.allCases.map { t in "\(t.rawValue):\(s.evidence.filter { $0.type == t }.count)" }.joined(separator: " ") }
     func smokeBack() { goBack() }
     /// Selects a topic row by the topic's key, as a click on that row would (never by a fixed row number: the order
     /// changes with the period and the switches). Answers the row it was found at, or nil when it is not in view.
@@ -335,7 +364,7 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
             let result = Importer.save(parsed, name: url.deletingPathExtension().lastPathComponent, places: places)
             DispatchQueue.main.async {
                 self.statusLabel.stringValue = HorizonController.describe(result, what: "Imported as a snapshot")
-                if result.problem == nil { self.reread(nil) }
+                if result.problem == nil { self.keepForStatus(self.statusLabel.stringValue); self.reread(nil) }
             }
         }
     }
@@ -367,7 +396,7 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
                     DispatchQueue.main.async {
                         self.mailButton.isEnabled = true
                         self.statusLabel.stringValue = got.outcome.message + (result.map { " · " + HorizonController.describe($0, what: "Saved") } ?? "")
-                        if result?.file != nil { self.reread(nil) }
+                        if result?.file != nil { self.keepForStatus(self.statusLabel.stringValue); self.reread(nil) }
                     }
                 }
             }

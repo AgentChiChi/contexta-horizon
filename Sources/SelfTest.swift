@@ -699,7 +699,8 @@ func runSelfTest() -> Int32 {
     /// the settings, the first ranked topic, Export.simple) — not through the command's own code path.
     func nativePreview(_ q: String, home h: URL, _ configure: (Preferences) -> Void = { _ in }) -> String {
         let prefs = Preferences(store: MemoryStore()); configure(prefs)
-        let snapNow = Snapshot.read(Places(home: h)), w = prefs.window(now: Date()).window, on = prefs.enabled
+        let w = prefs.window(now: Date()).window, on = prefs.enabled
+        let snapNow = Snapshot.read(Places(home: h), enabled: on)                // as the windows read from 0.5.2 on: only what the switches allow
         let list = Analysis.topics(snapNow.evidence, window: w, enabled: on), typed = q.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let top = Search.rank(typed, topics: list).first?.topic else { return "" }
         return Export.simple(task: typed, topic: top, window: w, coverage: SourceKind.allCases.map { snapNow.coverage(for: $0, window: w, enabled: on) })
@@ -773,12 +774,16 @@ func runSelfTest() -> Int32 {
     let mailOffRun = asideProcess(asideQuery("Harborline 견적"), home: home, ["source.mail": "NO"]), mailOffNative = nativePreview("Harborline 견적", home: home) { $0.set(.mail, false) }
     let aiOffRun = asideProcess(asideQuery("Harborline 견적"), home: home, ["source.ai": "NO"]), importsOffRun = asideProcess(asideQuery("Harborline 견적"), home: home, ["source.imports": "NO"])
     let northOn = asideProcess(asideQuery("northfield"), home: home), northMailOff = asideProcess(asideQuery("northfield"), home: home, ["source.mail": "NO"])
-    check("H45", "the saved source switches are honoured exactly as in the windows: with Mail off the command's handoff is the native preview with Mail off (no mail line, mail reported \"off\") and differs from the default one; likewise with AI chats off and with Imports off; a topic that exists only in mail (Northfield) is matched by default and is \"no_match\" with Mail off",
-          mailOffRun.status == "matched" && !mailOffNative.isEmpty && mailOffRun.handoff == mailOffNative && mailOffRun.handoff != nativePreview("Harborline 견적", home: home) && !mailOffRun.handoff.contains(" · Mail · ") && mailOffRun.sources["mail"] == "off" && mailOffRun.sources["ai"] == "ok" &&
-          aiOffRun.handoff == nativePreview("Harborline 견적", home: home) { $0.set(.ai, false) } && !aiOffRun.handoff.contains(" · AI · ") && aiOffRun.handoff.contains(" · Mail · ") && aiOffRun.sources["ai"] == "off" &&
-          importsOffRun.handoff == nativePreview("Harborline 견적", home: home) { $0.set(.imports, false) } && importsOffRun.sources["imports"] == "off" && !importsOffRun.handoff.contains("snapshot") && mailOffRun.handoff.contains("Imports: snapshot") &&
+    let allOnRun = asideProcess(asideQuery("Harborline 견적"), home: home)
+    check("H45", "the saved source switches are honoured exactly as in the windows, and from 0.5.2 they decide what is opened: with Mail off the command's handoff is the native preview with Mail off — no mail line, mail reported \"off\" — and the imports are skipped whole (an import file can mix chat and mail records, so none is opened: no imported chat title appears, imports are reported \"off\", and the caution says \"Imports: skipped\" rather than nothing); likewise with AI chats off (the feed's own mail line stays, no imported mail); with Imports off the caution does not mention imports at all; with everything on the imported snapshots are there as before; a topic that exists only in mail (Northfield) is matched by default and is \"no_match\" with Mail off",
+          mailOffRun.status == "matched" && !mailOffNative.isEmpty && mailOffRun.handoff == mailOffNative && mailOffRun.handoff != allOnRun.handoff && !mailOffRun.handoff.contains(" · Mail · ") && mailOffRun.sources == ["files": "ok", "ai": "ok", "mail": "off", "imports": "off"] &&
+          mailOffRun.handoff.contains(" · AI · Harborline 견적 검토\n") && !mailOffRun.handoff.contains("가격 협상") && !mailOffRun.handoff.contains("계약 조항") && mailOffRun.handoff.contains("Source caution: AI chats: stale, partial · Imports: skipped\n") &&
+          aiOffRun.handoff == nativePreview("Harborline 견적", home: home) { $0.set(.ai, false) } && !aiOffRun.handoff.contains(" · AI · ") && aiOffRun.handoff.contains(" · Mail · RE: Harborline quote\n") && !aiOffRun.handoff.contains("견적 회신") && !aiOffRun.handoff.contains("회신 건") &&
+          aiOffRun.sources == ["files": "ok", "ai": "off", "mail": "ok", "imports": "off"] && aiOffRun.handoff.contains("Source caution: Mail: partial · Imports: skipped\n") &&
+          importsOffRun.handoff == nativePreview("Harborline 견적", home: home) { $0.set(.imports, false) } && importsOffRun.sources["imports"] == "off" && !importsOffRun.handoff.contains("snapshot") && !importsOffRun.handoff.contains("Imports") &&
+          allOnRun.handoff == nativePreview("Harborline 견적", home: home) && allOnRun.handoff.contains("Imports: snapshot") && allOnRun.handoff.contains(" · AI · Harborline 가격 협상 준비") && allOnRun.sources == allOK &&
           northOn.status == "matched" && northOn.handoff.hasPrefix("Task: northfield\n3 months to ") && northOn.handoff.contains(" · Mail · Northfield ") && northMailOff.status == "no_match" && northMailOff.reason == "no_matching_topic" && northMailOff.exit == 0,
-          mailOffRun.text + " // " + aiOffRun.text + " // " + northMailOff.text)
+          mailOffRun.text + " // " + aiOffRun.text + " // " + importsOffRun.text + " // " + northMailOff.text)
     let sixRun = asideProcess(asideQuery("northfield cap"), home: home, ["windowMonths": "6"]), threeRun = asideProcess(asideQuery("northfield cap"), home: home)
     let dayA = Dates.day(cStart), dayB = Dates.day(cEnd)
     let customRun = asideProcess(asideQuery("Harborline 견적"), home: home, ["windowCustom": "YES", "customStart": dayA, "customEnd": dayB, "windowMonths": "6"])
@@ -796,6 +801,107 @@ func runSelfTest() -> Int32 {
     check("H47", "the command changes nothing: after every run above (about fifty, matched, refused and unavailable alike) each file and folder of the synthetic homes is as it was — same names, sizes, dates, permissions and contents — and no file was added anywhere; the settings were given on the command line, so none was read from or written to anybody's saved preferences",
           !treeBefore.isEmpty && treeBefore == treeAfter && asideSettings().count == 16 && asideSettings(["source.mail": "NO"]).joined(separator: " ").contains("-source.mail NO"),
           "\(treeBefore.count) → \(treeAfter.count): " + Set(treeAfter).symmetricDifference(Set(treeBefore)).prefix(4).joined(separator: " | "))
+
+    // ── 0.5.2: a switch decides what is opened — watched at the reader's own dispatch (Reader.probe) ──
+    let trace = ReadTrace(); trace.start()
+    let fullSnap = Snapshot.read(places, now: real)
+    let fullEvents = trace.events
+    let importFilesNow = ((try? fm.contentsOfDirectory(atPath: places.imports.path)) ?? []).filter { $0.hasSuffix(".jsonl") }.count
+    func key(_ e: Evidence) -> String { e.origin.rawValue + "|" + e.type.rawValue + "|" + e.id + "|" + e.title }
+    var gateFailures: [String] = [], comboAnswers: [String] = []
+    for mask in 0..<16 {
+        let on = Set(SourceKind.allCases.enumerated().filter { mask & (1 << $0.offset) != 0 }.map { $0.element })
+        let name = on.isEmpty ? "none" : SourceKind.allCases.filter(on.contains).map { $0.rawValue }.joined(separator: "+")
+        trace.reset()
+        let g = Snapshot.read(places, enabled: on, now: real)
+        let ev = trace.events
+        let wantImports = on.isSuperset(of: [.imports, .ai, .mail]), wantManifest = !on.isDisjoint(with: [.files, .ai, .mail])
+        let allowed = Set(fullSnap.evidence.filter { $0.isOn(on) && ($0.origin != .imports || wantImports) }.map(key))
+        var why: [String] = []
+        if trace.touched(places.preindex) != (on.contains(.files) ? 1 : 0) { why.append("preindex") }
+        if trace.touched(places.ai) != (on.contains(.ai) ? 1 : 0) { why.append("ai.jsonl") }
+        if trace.touched(places.mail) != (on.contains(.mail) ? 1 : 0) { why.append("mail.jsonl") }
+        if trace.touched(places.manifest) != (wantManifest ? 1 : 0) { why.append("manifest") }
+        if trace.under(places.imports) != (wantImports ? 1 + importFilesNow : 0) { why.append("imports \(trace.under(places.imports))") }
+        if ev.count != (on.contains(.files) ? 1 : 0) + (on.contains(.ai) ? 1 : 0) + (on.contains(.mail) ? 1 : 0) + (wantManifest ? 1 : 0) + (wantImports ? 1 + importFilesNow : 0) { why.append("other paths: \(ev.count)") }
+        if on.isEmpty && !ev.isEmpty { why.append("all off but something was opened") }
+        if !g.evidence.allSatisfy({ $0.isOn(on) }) || Set(g.evidence.map(key)) != allowed { why.append("kept records") }
+        if !SourceKind.allCases.allSatisfy({ k in g.coverage[k]?.gated == !(k == .imports ? wantImports : on.contains(k)) }) { why.append("gated flags") }
+        // the command's own decision, in this process with the same trace, and the real command as a separate process: the same answer
+        let prefs = Preferences(store: MemoryStore()); for k in SourceKind.allCases { prefs.set(k, on.contains(k)) }
+        trace.reset()
+        let answer = AsideLookup.answer(input: asideQuery("Harborline 견적"), places: places, preferences: prefs)
+        let evAnswer = trace.events
+        if trace.touched(places.preindex) != (on.contains(.files) ? 1 : 0) || trace.touched(places.ai) != (on.contains(.ai) ? 1 : 0) || trace.touched(places.mail) != (on.contains(.mail) ? 1 : 0) || trace.touched(places.manifest) != (wantManifest ? 1 : 0) || trace.under(places.imports) != (wantImports ? 1 + importFilesNow : 0) || (on.isEmpty && !evAnswer.isEmpty) { why.append("lookup opened \(evAnswer.count)") }
+        var changes: [String: String] = [:]
+        for k in SourceKind.allCases { changes["source." + k.rawValue] = on.contains(k) ? "YES" : "NO" }
+        let run = asideProcess(asideQuery("Harborline 견적"), home: home, changes)
+        if run.text != AsideLookup.json(answer) + "\n" || run.exit != answer.exitCode { why.append("process answer differs") }
+        if answer.sources["imports"] != (wantImports ? "ok" : "off") || SourceKind.allCases.filter({ $0 != .imports }).contains(where: { answer.sources[$0.rawValue] != (on.contains($0) ? "ok" : "off") }) { why.append("source states \(answer.sources)") }
+        if on.isEmpty && !(answer.status == .unavailable && answer.reason == "all_sources_off" && answer.handoff.isEmpty) { why.append("all-off answer") }
+        comboAnswers.append(name + "=" + answer.status.rawValue)
+        if !why.isEmpty { gateFailures.append(name + ": " + why.joined(separator: ", ")) }
+    }
+    trace.reset()
+    let refusedTrace = AsideLookup.answer(input: Data("{}".utf8), places: places, preferences: Preferences(store: MemoryStore()))
+    let refusedEvents = trace.events
+    check("H59", "a switch decides what is opened, in all 16 combinations of the four switches, watched at the reader's own dispatch (the place every source file is lstat'ed, opened and read, and the place the imports folder is looked for and listed): the preindex, ai.jsonl and mail.jsonl are each reached for exactly once when their own switch is on and never when it is off; the imports folder and its files only while Imports, AI chats and Mail are all on; the manifest only while at least one feed is on; with every switch off nothing at all — and nothing outside these paths in any case. What is kept is exactly the records the switches allow. The lookup command decides the same way (traced in this process), and the real command, run as a separate process with the same switches, gives the identical answer each time; invalid input still reads nothing",
+          gateFailures.isEmpty && comboAnswers.count == 16 && fullEvents.count == 5 + importFilesNow && importFilesNow >= 5 && fullSnap.evidence.contains { $0.origin == .imports && $0.type == .mail } && fullSnap.evidence.contains { $0.origin == .imports && $0.type == .ai } &&
+          refusedTrace.status == .invalid && refusedEvents.isEmpty,
+          gateFailures.joined(separator: " | ") + " // " + comboAnswers.joined(separator: " "))
+    let mailOffSet: Set<SourceKind> = [.files, .ai, .imports]
+    trace.reset()
+    let cut = fullSnap.restricted(to: mailOffSet)
+    let cutEvents = trace.events
+    let gatedRead = Snapshot.read(places, enabled: mailOffSet, now: real)
+    let cutCov = SourceKind.allCases.map { cut.coverage(for: $0, window: h3, enabled: mailOffSet) }, gatedCov = SourceKind.allCases.map { gatedRead.coverage(for: $0, window: h3, enabled: mailOffSet) }
+    let back = Snapshot.read(places, enabled: all, now: real)
+    let emptyHomeCov = Snapshot.read(Places(home: home3), enabled: all, now: real).coverage(for: .imports, window: h3, enabled: all)
+    let importsOffCov = Snapshot.read(places, enabled: [.files, .ai, .mail], now: real).coverage(for: .imports, window: h3, enabled: [.files, .ai, .mail])
+    check("H60", "turning a switch off empties it from memory at once and reads nothing: restricting a full snapshot to \"Mail off\" touches no file, leaves no mail record and no imported record at all (imports can mix chat and mail, so they go whole), and is the same as reading afresh with Mail off; it no longer covers \"everything on\", so turning Mail back on is a new read, which brings every record back. Skipped imports are told apart from absent ones and from a switch that is off: \"Skipped, not opened — …\" (the lookup's fixed state: off; the caution: \"Imports: skipped\"), \"Nothing imported yet\" (state: empty), \"Off — not used in the results\"; the wording states the fact and does not tell anyone to turn a source on",
+          cutEvents.isEmpty && !cut.evidence.isEmpty && cut.evidence.allSatisfy { $0.type != .mail && $0.origin != .imports && $0.origin != .mail } && Set(cut.evidence.map(key)) == Set(gatedRead.evidence.map(key)) &&
+          zip(cutCov, gatedCov).allSatisfy { $0.summary == $1.summary } && cut.coverage[.imports]?.gated == true && cut.coverage[.mail]?.gated == true && cut.coverage[.imports]?.rows.isEmpty == true && cut.importFiles == 0 &&
+          cut.covers(mailOffSet) && !cut.covers(all) && fullSnap.covers(all) && fullSnap.covers(mailOffSet) && Set(back.evidence.map(key)) == Set(fullSnap.evidence.map(key)) && back.evidence.count == fullSnap.evidence.count &&
+          cutCov[3].summary.hasPrefix("Skipped, not opened — an import file can mix AI chat and mail records, so none is opened while AI chats or Mail is off") && AsideLookup.state(cutCov[3]) == "off" && cutCov[2].summary == "Off — not used in the results" &&
+          (Export.caption(cutCov) ?? "").hasSuffix("Imports: skipped") && emptyHomeCov.summary == "Nothing imported yet" && AsideLookup.state(emptyHomeCov) == "empty" && importsOffCov.summary == "Off — not used in the results" && !(Export.caption([importsOffCov]) ?? "").contains("Imports") &&
+          !cutCov[3].summary.lowercased().contains("turn ") && !cutCov[3].summary.lowercased().contains("switch on") && !cutCov[3].summary.lowercased().contains("enable"),
+          "\(cutEvents.count) events; " + cutCov.map { $0.summary }.joined(separator: " || ") + " // " + (Export.caption(cutCov) ?? "nil"))
+    // switching off either of the two types an import file can mix: both types of imported record go, as in a cold start of the command
+    var toggleFailures: [String] = []
+    for offKind in [SourceKind.ai, .mail] {
+        let on = all.subtracting([offKind])
+        trace.reset()
+        let warm = fullSnap.restricted(to: on)                                   // the dashboard's snapshot the moment the switch is turned off
+        if !trace.events.isEmpty { toggleFailures.append("\(offKind.rawValue) off: read something") }
+        if warm.evidence.contains(where: { $0.origin == .imports }) || (warm.coverage[.imports]?.rows.isEmpty == false) { toggleFailures.append("\(offKind.rawValue) off: imported records kept (" + Set(warm.evidence.filter { $0.origin == .imports }.map { $0.type.rawValue }).sorted().joined(separator: ",") + ")") }
+        if warm.evidence.contains(where: { $0.type.governing == offKind }) { toggleFailures.append("\(offKind.rawValue) off: its own records kept") }
+        let prefs = Preferences(store: MemoryStore()); prefs.set(offKind, false)
+        let cold = AsideLookup.answer(input: asideQuery("Harborline 견적"), places: places, preferences: prefs, now: real)
+        let warmText = AsideLookup.handoff(query: "Harborline 견적", view: AsideLookup.view(warm, preferences: prefs, now: real)) ?? ""
+        if cold.status != .matched || warmText != cold.handoff || warmText.isEmpty { toggleFailures.append("\(offKind.rawValue) off: differs from a cold start") }
+        if Set(warm.evidence.map(key)) != Set(Snapshot.read(places, enabled: on, now: real).evidence.map(key)) { toggleFailures.append("\(offKind.rawValue) off: not the cold read's records") }
+        let again = Snapshot.read(places, enabled: all, now: real)               // the switch turned on again: a new read
+        if warm.covers(all) || Set(again.evidence.map(key)) != Set(fullSnap.evidence.map(key)) || !again.evidence.contains(where: { $0.origin == .imports && $0.type == .ai }) || !again.evidence.contains(where: { $0.origin == .imports && $0.type == .mail }) { toggleFailures.append("\(offKind.rawValue) on again: not everything back") }
+    }
+    check("H62", "an import file can mix chat and mail records, so turning off either AI chats or Mail removes BOTH kinds of imported record from memory at once — the list of records and the per-source coverage agree — without reading anything; what is left, and the handoff made from it, is exactly what a cold start of the lookup command gives with that switch off; turning the switch on again is a new read and brings both kinds of imported record back",
+          toggleFailures.isEmpty && fullSnap.evidence.filter { $0.origin == .imports && $0.type == .ai }.count >= 2 && fullSnap.evidence.filter { $0.origin == .imports && $0.type == .mail }.count >= 2,
+          toggleFailures.joined(separator: " | "))
+    // the fictional example: in memory only, never part of anything real
+    let treeBeforeExample = fingerprint(temp)
+    trace.reset()
+    let fiction = FictionalExample.make(now: real)
+    let fictionText = fiction.topics.first.map { Export.simple(task: "Follow up on the Harborline quote", topic: $0, window: fiction.window, coverage: []) } ?? ""
+    let fictionEvents = trace.events
+    let realAnswer = AsideLookup.answer(input: asideQuery("Harborline delivery plan"), places: places, preferences: Preferences(store: MemoryStore()))
+    let emptyAnswer = AsideLookup.answer(input: asideQuery("Harborline quote"), places: Places(home: home3), preferences: Preferences(store: MemoryStore()))
+    check("H61", "the fictional example is made in memory and stays apart: building it and its preview reaches for no file (reader trace empty) and changes nothing on disk; it is one made-up topic, Harborline, with two file, two chat and two mail titles dated within the last three weeks, and its preview is the ordinary Export.simple text (task line, topic, signals with the \"not proof\" caveat, six numbered dated lines); none of it can reach the lookup command — on an empty home the command still answers \"unavailable\" with an empty handoff, and on the synthetic home a title that exists only in the example is not in its answer",
+          fictionEvents.isEmpty && fingerprint(temp) == treeBeforeExample && fiction.topics.count == 1 && fiction.topics[0].key == FictionalExample.key && fiction.topics[0].display == "Harborline" && fiction.topics[0].items.count == 6 && fiction.topics[0].types == [.file, .ai, .mail] &&
+          fiction.topics[0].items.allSatisfy { $0.evidence.id.hasPrefix("fictional-example-") && $0.evidence.source == "Fictional example" && $0.evidence.locator.isEmpty && $0.direct && real.timeIntervalSince($0.evidence.date) <= 21 * 86400 } &&
+          fictionText.hasPrefix("Task: Follow up on the Harborline quote\nTopic: Harborline · " + h3.dayLabel + "\nSignals: 6 records (File 2 · AI 2 · Mail 2) · 6 direct / 0 inferred — title counts are signals, not proof of completed work\n[F1] " + Dates.day(real.addingTimeInterval(-3 * 86400)) + " · File · Harborline Q3 quote.xlsx\n") &&
+          citeLines(fictionText).count == 6 && fictionText.contains(" · AI · Harborline quote review notes\n") && fictionText.contains(" · Mail · Re: Harborline quote revision\n") && !fictionText.contains("Source caution") && claimsNoOutcome(fictionText) &&
+          emptyAnswer.status == .unavailable && emptyAnswer.handoff.isEmpty && !AsideLookup.json(emptyAnswer).contains("Harborline") && realAnswer.status == .matched && !realAnswer.handoff.contains("delivery plan.pdf") && !realAnswer.handoff.contains("pricing questions") && !AsideLookup.json(realAnswer).lowercased().contains("fictional"),
+          "\(fictionEvents.count) events // " + fictionText + " // " + AsideLookup.json(emptyAnswer))
+    trace.stop()
 
     // ── settings and manifest ──
     let store = MemoryStore(), prefs = Preferences(store: store)
@@ -816,6 +922,20 @@ func runSelfTest() -> Int32 {
     print("\n== \(passed)/\(passed + failed) Horizon self-test checks passed ==")
     print("Synthetic data in a temporary folder only. Not checked here: the menu-bar item, dialogs, real sources, the real Mail app, a real refresh tool.")
     return failed == 0 ? 0 : 1
+}
+
+/// What the reader actually reached for on disk, recorded through Reader.probe: one entry for every file it is about
+/// to lstat (and then perhaps open and read) and for every look at the imports folder. Reads may run on a background queue.
+final class ReadTrace {
+    private var list: [String] = []
+    private let lock = NSLock()
+    func start() { Reader.probe = { [weak self] what, path in self?.add(what + " " + path) } }
+    func stop() { Reader.probe = nil }
+    private func add(_ e: String) { lock.lock(); list.append(e); lock.unlock() }
+    func reset() { lock.lock(); list = []; lock.unlock() }
+    var events: [String] { lock.lock(); defer { lock.unlock() }; return list }
+    func touched(_ url: URL) -> Int { events.filter { $0.hasSuffix(" " + url.path) }.count }
+    func under(_ url: URL) -> Int { events.filter { $0.contains(" " + url.path) }.count }
 }
 
 /// Runs the REAL headless command — this same executable, as a separate process — against a synthetic home, with every
@@ -911,6 +1031,7 @@ func runSampleCheck(_ path: String) -> Int32 {
     let fm = FileManager.default
     let temp = fm.temporaryDirectory.appendingPathComponent("horizon-smoke-" + UUID().uuidString, isDirectory: true)
     let places = Places(home: temp)
+    let trace = ReadTrace(); trace.start()                              // what the windows actually reach for on disk, at the reader's own dispatch
     let folder = URL(fileURLWithPath: out).deletingLastPathComponent()
     func put(_ url: URL, _ lines: [[String: Any]]) {
         try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -958,6 +1079,7 @@ func runSampleCheck(_ path: String) -> Int32 {
             expect("launch opens the simple screen with the field focused; the dashboard stays closed", simple.smokeWindow.isVisible && !dashboard.smokeWindow.isVisible && value(st, "simple.fieldFocused") == "true", st)
             expect("with nothing typed: two suggested topics, none chosen, no preview, Copy off", value(st, "simple.suggestions") == "Harborline · 4 | Atlas · 2" && value(st, "simple.copyEnabled") == "false" && value(st, "simple.preview").isEmpty && value(st, "simple.empty").hasPrefix("Choose a topic or type a task."), st)
             expect("the caption names the period and what to be careful about (a stale, partial AI feed)", value(st, "simple.caption").hasPrefix("Period: 3 months · ") && value(st, "simple.caption").contains("Source caution: AI chats: stale, partial"), st)
+            expect("with records in view the fictional example is not offered", value(st, "simple.exampleOffer") == "hidden" && value(st, "simple.exampleBanner") == "hidden" && value(st, "simple.example") == "false", st)
             _ = picture(simple.smokeWindow, "simple-1-start.png")
             // 2. type a task: suggestions ranked, the best match previewed with the task (identifier redacted)
             simple.smokeType("Follow up on the Harborline quote bob@example.com")
@@ -986,6 +1108,9 @@ func runSampleCheck(_ path: String) -> Int32 {
             _ = simple.smokeReturn()
             st = simple.smokeState()
             expect("a task with no match clears the preview and turns Copy off; pressing Copy or Return copies nothing", value(st, "simple.suggestions").isEmpty && value(st, "simple.preview").isEmpty && value(st, "simple.copyEnabled") == "false" && value(st, "simple.copyCount") == "0" && value(st, "simple.hint") == "No matching topic was found." && value(st, "simple.empty").hasPrefix("No topic matches “zzqx nosuchtopic”."), st)
+            simple.smokeForceTryExample()
+            st = simple.smokeState()
+            expect("an ordinary task with no match does not offer the fictional example, and the example cannot be entered", value(st, "simple.exampleOffer") == "hidden" && value(st, "simple.example") == "false" && value(st, "simple.hint") == "No matching topic was found.", st)
             _ = picture(simple.smokeWindow, "simple-4-no-match.png")
             let cliNone = asideProcess(asideQuery("zzqx nosuchtopic"), home: temp)
             expect("where the window shows no preview, the headless lookup answers no_match with an empty handoff and does not repeat the task", cliNone.exit == 0 && cliNone.wellFormed && cliNone.status == "no_match" && cliNone.handoff.isEmpty && !cliNone.text.contains("zzqx"), [cliNone.text])
@@ -1050,14 +1175,127 @@ func runSampleCheck(_ path: String) -> Int32 {
             dashboard.smokeBack()
             st = simple.smokeState()
             expect("\"Simple View\" shows the simple screen again; through the whole run nothing was copied", simple.smokeWindow.isVisible && value(st, "simple.copyCount") == "0", st)
-            let pictures = ["simple-1-start.png", "simple-2-typed.png", "simple-3-picked.png", "simple-4-no-match.png", "simple-5-back-from-settings.png", "window-custom-synthetic.png", URL(fileURLWithPath: out).lastPathComponent]
-            expect("pictures saved: " + pictures.joined(separator: ", "), pictures.allSatisfy { fm.fileExists(atPath: folder.appendingPathComponent($0).path) })
-            try? fm.removeItem(at: temp)
-            print(failures.isEmpty ? "SMOKE PASS  launch → type → preview → Return → pick another → no match (no copy) → Sources & Settings → custom period → back, on synthetic data; the clipboard was never written" : "SMOKE FAIL  " + failures.joined(separator: "; "))
-            exit(failures.isEmpty ? 0 : 1)
+            var pictures = ["simple-1-start.png", "simple-2-typed.png", "simple-3-picked.png", "simple-4-no-match.png", "simple-5-back-from-settings.png", "window-custom-synthetic.png", URL(fileURLWithPath: out).lastPathComponent]
+            let finish: () -> Never = {
+                expect("pictures saved: " + pictures.joined(separator: ", "), pictures.allSatisfy { fm.fileExists(atPath: folder.appendingPathComponent($0).path) })
+                try? fm.removeItem(at: temp)
+                print(failures.isEmpty ? "SMOKE PASS  launch → type → preview → Return → pick another → no match (no copy) → Sources & Settings → custom period → back → switches gate what is read (off, on, races, all off) → fictional example entered and left on an empty home, on synthetic data; the clipboard was never written" : "SMOKE FAIL  " + failures.joined(separator: "; "))
+                exit(failures.isEmpty ? 0 : 1)
+            }
+            /// Runs `body` shortly after the next read whose answer the dashboard keeps (stale answers never call back).
+            let afterRead: (HorizonController, @escaping () -> Void) -> Void = { d, body in d.onRead = { d.onRead = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { body() } } }
+            let full = "files:3 ai:5 mail:2 imports:2 | file:3 ai:6 mail:3"
+
+            // 7. the switches decide what is read. One import file mixing a chat and a mail record is added first (as an import would).
+            dashboard.smokeChoosePreset(0)
+            var mixed = Importer.Parsed(); mixed.format = "jsonl"
+            mixed.rows = [Importer.row(id: "smoke:chat", title: "Harborline imported chat", date: now.addingTimeInterval(-6 * 86400), source: "export", locator: "", kind: .ai, via: "jsonl"),
+                          Importer.row(id: "smoke:mail", title: "Harborline imported mail", date: now.addingTimeInterval(-7 * 86400), source: "export", locator: "", kind: .mail, via: "jsonl")]
+            let savedMixed = Importer.save(mixed, name: "mixed", places: places, now: now)
+            trace.reset(); dashboard.smokeReread()
+            afterRead(dashboard) {
+                var d = dashboard.smokeState()
+                expect("with every switch on, each source is read once: the preindex, both feeds, the manifest, the imports folder and its one file", savedMixed.imported == 2 && dashboard.smokeHeld == full && trace.touched(places.preindex) == 1 && trace.touched(places.ai) == 1 && trace.touched(places.mail) == 1 && trace.touched(places.manifest) == 1 && trace.under(places.imports) == 2 && trace.events.count == 6 && value(d, "source.imports").hasPrefix("Imports: 2 in this period (2 total)"), d + trace.events + [dashboard.smokeHeld])
+                // Mail off: gone from memory at once, the mixed imports with it, and nothing is read for that
+                let asked0 = dashboard.smokeReads.asked
+                trace.reset(); dashboard.smokeToggle(.mail, false)
+                d = dashboard.smokeState()
+                let s7 = simple.smokeState()
+                expect("turning Mail off reads nothing and empties memory of mail and of the imports (which can mix chat and mail) at once; the window says Mail is off and the imports were skipped, not that they are absent", trace.events.isEmpty && dashboard.smokeReads.asked == asked0 && dashboard.smokeHeld == "files:3 ai:5 mail:0 imports:0 | file:3 ai:5 mail:0" && value(d, "source.mail") == "Mail: Off — not used in the results" && value(d, "source.imports").hasPrefix("Imports: Skipped, not opened — an import file can mix AI chat and mail records") && value(s7, "simple.caption").contains("Imports: skipped") && !value(s7, "simple.caption").contains("Mail:"), d + s7 + trace.events + [dashboard.smokeHeld])
+                trace.reset(); dashboard.smokeReread()
+                afterRead(dashboard) {
+                    expect("\"Reread Sources\" with Mail off never reaches for mail.jsonl or the imports folder: only the preindex, ai.jsonl and the manifest", trace.touched(places.mail) == 0 && trace.under(places.imports) == 0 && trace.touched(places.preindex) == 1 && trace.touched(places.ai) == 1 && trace.touched(places.manifest) == 1 && trace.events.count == 3 && dashboard.smokeHeld == "files:3 ai:5 mail:0 imports:0 | file:3 ai:5 mail:0", trace.events + [dashboard.smokeHeld])
+                    trace.reset(); dashboard.smokeToggle(.mail, true)
+                    afterRead(dashboard) {
+                        d = dashboard.smokeState()
+                        expect("turning Mail on again starts a read, and mail and both kinds of imported record are back", dashboard.smokeReads.asked == asked0 + 2 && dashboard.smokeHeld == full && trace.touched(places.mail) == 1 && trace.under(places.imports) == 2 && value(d, "source.mail").hasPrefix("Mail: 1 in this period (2 total)") && value(d, "source.imports").hasPrefix("Imports: 2 in this period (2 total)"), d + trace.events + [dashboard.smokeHeld])
+                        // a race: a read is under way (asked for with Mail off) when Mail is turned on and Files off
+                        let r0 = dashboard.smokeReads
+                        dashboard.smokeToggle(.mail, false)
+                        trace.reset(); dashboard.smokeReread()            // read A: files, AI chats (no mail, no imports)
+                        dashboard.smokeToggle(.mail, true)                // newly on while A runs: read B is started, A's answer will be stale
+                        dashboard.smokeToggle(.files, false)              // off while B runs: nothing is read for it, and B's answer is cut down before it is kept
+                        let r1 = dashboard.smokeReads
+                        expect("switches clicked while a read is under way: turning on starts a newer read, turning off starts none, and what is off is out of memory immediately", r1.asked == r0.asked + 2 && r1.busy && r1.stale == r0.stale && dashboard.smokeHeld == "files:0 ai:5 mail:0 imports:0 | file:0 ai:5 mail:0", ["asked \(r0.asked)→\(r1.asked) stale \(r1.stale) busy \(r1.busy)", dashboard.smokeHeld])
+                        afterRead(dashboard) {
+                            let r2 = dashboard.smokeReads
+                            d = dashboard.smokeState()
+                            expect("the older read's answer is dropped unseen, and the newer one — which had read the files before Files was turned off — is kept without them: memory matches the switches (Files off, the rest on)", r2.stale == r0.stale + 1 && r2.asked == r1.asked && !r2.busy && dashboard.smokeHeld == "files:0 ai:5 mail:2 imports:2 | file:0 ai:6 mail:3" && value(d, "source.files") == "Files: Off — not used in the results" && trace.touched(places.mail) == 1, d + ["stale \(r0.stale)→\(r2.stale)", dashboard.smokeHeld] + trace.events)
+                            // everything off: nothing in memory, nothing read — not even by "Reread Sources"
+                            trace.reset()
+                            for k in [SourceKind.ai, .mail, .imports] { dashboard.smokeToggle(k, false) }
+                            expect("with every switch off nothing is held and nothing was read to get there", trace.events.isEmpty && dashboard.smokeHeld == "files:0 ai:0 mail:0 imports:0 | file:0 ai:0 mail:0" && dashboard.smokeTopicKeys.isEmpty, trace.events + [dashboard.smokeHeld])
+                            dashboard.smokeReread()
+                            afterRead(dashboard) {
+                                let offRun = asideProcess(asideQuery("Harborline quote"), home: temp, ["source.files": "NO", "source.ai": "NO", "source.mail": "NO", "source.imports": "NO"])
+                                d = dashboard.smokeState()
+                                expect("\"Reread Sources\" with every switch off opens nothing at all, not even the manifest; the lookup command with the same switches answers \"unavailable\" (all_sources_off)", trace.events.isEmpty && dashboard.smokeHeld == "files:0 ai:0 mail:0 imports:0 | file:0 ai:0 mail:0" && SourceKind.allCases.allSatisfy { value(d, "source." + $0.rawValue).hasSuffix(": Off — not used in the results") } && offRun.status == "unavailable" && offRun.reason == "all_sources_off" && offRun.exit == 3, d + trace.events + [offRun.text])
+                                let r3 = dashboard.smokeReads
+                                trace.reset()
+                                for k in SourceKind.allCases { dashboard.smokeToggle(k, true) }      // four clicks in a row: four reads asked for, only the last one's answer is used
+                                afterRead(dashboard) {
+                                    let r4 = dashboard.smokeReads
+                                    let s8 = simple.smokeState()
+                                    expect("turning all four on in quick succession: every earlier answer is dropped as stale, the last one is kept, and everything is back", r4.asked == r3.asked + 4 && r4.stale == r3.stale + 3 && !r4.busy && dashboard.smokeHeld == full && dashboard.smokeTopicKeys == ["harborline", "atlas"] && value(s8, "simple.exampleOffer") == "hidden", ["asked \(r3.asked)→\(r4.asked) stale \(r3.stale)→\(r4.stale)", dashboard.smokeHeld] + s8)
+                                    _ = picture(dashboard.smokeWindow, "window-switches-restored.png"); pictures.append("window-switches-restored.png")
+
+                                    // 8. the fictional example, on an EMPTY home (no WorkIndex at all), in its own pair of windows
+                                    simple.smokeWindow.orderOut(nil); dashboard.smokeWindow.orderOut(nil)
+                                    let emptyHome = temp.appendingPathComponent("empty-home", isDirectory: true)
+                                    let emptyStore = MemoryStore()
+                                    let dashboard2 = HorizonController(places: Places(home: emptyHome), preferences: Preferences(store: emptyStore))
+                                    let simple2 = SimpleController(dashboard: dashboard2)
+                                    dashboard2.onChange = { simple2.refresh() }
+                                    dashboard2.onBack = { simple2.show() }
+                                    dashboard2.onUseTopic = { key in simple2.show(pick: key) }
+                                    afterRead(dashboard2) {
+                                        var e = simple2.smokeState()
+                                        let emptyHint = "No topics were found in this period with the sources that are on."
+                                        expect("on an empty install the empty screen offers one action, \"Try a fictional example\", and nothing else new", value(e, "simple.hint") == emptyHint && value(e, "simple.exampleOffer") == "Try a fictional example" && value(e, "simple.exampleBanner") == "hidden" && value(e, "simple.example") == "false" && value(e, "simple.copyEnabled") == "false" && value(e, "simple.preview").isEmpty && value(e, "simple.title") == "Contexta Horizon", e)
+                                        _ = picture(simple2.smokeWindow, "example-0-empty.png")
+                                        simple2.smokeType("zzqx nothing here")
+                                        simple2.smokeForceTryExample()
+                                        e = simple2.smokeState()
+                                        let typedOffer = value(e, "simple.exampleOffer"), typedExample = value(e, "simple.example")
+                                        simple2.smokeType("")
+                                        e = simple2.smokeState()
+                                        expect("while a task is typed on the empty screen the offer is hidden and the example cannot be entered; clearing the field brings the offer back", typedOffer == "hidden" && typedExample == "false" && value(e, "simple.exampleOffer") == "Try a fictional example" && value(e, "simple.example") == "false", e + ["while typed: offer=" + typedOffer + " example=" + typedExample])
+                                        trace.reset()
+                                        simple2.smokeTryExample()
+                                        e = simple2.smokeState()
+                                        let shownExample = value(e, "simple.preview")
+                                        expect("pressing it shows a clearly labelled, made-up Harborline topic: the window title, a banner with \"Exit example\", and the caption all say it is fictional; the offer is gone; Copy is off", value(e, "simple.example") == "true" && value(e, "simple.title") == "Contexta Horizon — fictional example" && value(e, "simple.exampleBanner").hasPrefix("Fictional example — made-up Harborline records. Nothing here is from your Mac") && value(e, "simple.exampleBanner").hasSuffix("[Exit example]") && value(e, "simple.caption").hasPrefix("Fictional example · not your records") && value(e, "simple.exampleOffer") == "hidden" && value(e, "simple.copyEnabled") == "false" && value(e, "simple.status") == "Copy is off in the example." && value(e, "simple.suggestions") == "Harborline · 6*", e)
+                                        expect("its preview is made by the real formatter: topic, period, signals with the \"not proof\" caveat, and dated file, chat and mail titles", shownExample == Export.simple(task: "", topic: FictionalExample.make(now: Date()).topics[0], window: HorizonWindow(months: 3, now: Date()), coverage: []) && shownExample.hasPrefix("Topic: Harborline · 3 months · ") && shownExample.contains("\nSignals: 6 records (File 2 · AI 2 · Mail 2) · 6 direct / 0 inferred — title counts are signals, not proof of completed work\n") && shownExample.contains(" · File · Harborline Q3 quote.xlsx\n") && shownExample.contains(" · AI · Harborline quote review notes\n") && shownExample.contains(" · Mail · Re: Harborline quote revision\n") && shownExample.split(separator: "\n").count == 8, [shownExample])
+                                        _ = picture(simple2.smokeWindow, "example-1-shown.png")
+                                        simple2.smokeType("Follow up on the Harborline quote")
+                                        let handled2 = simple2.smokeReturn()
+                                        simple2.smokePressCopyWhileDisabled()
+                                        e = simple2.smokeState()
+                                        expect("a task can be typed in the example (the preview gains the task line), and neither Return nor Copy copies anything", handled2 && value(e, "simple.preview").hasPrefix("Task: Follow up on the Harborline quote\nTopic: Harborline · 3 months · ") && value(e, "simple.copyEnabled") == "false" && value(e, "simple.copyCount") == "0" && value(e, "simple.status") == "Copy is off in the example." && value(e, "simple.example") == "true", e)
+                                        _ = picture(simple2.smokeWindow, "example-2-task.png")
+                                        simple2.smokeType("zzqx nosuchtopic")
+                                        e = simple2.smokeState()
+                                        expect("a task with no match inside the example shows no preview and still only the way out", value(e, "simple.preview").isEmpty && value(e, "simple.exampleOffer") == "hidden" && value(e, "simple.exampleBanner").hasSuffix("[Exit example]") && value(e, "simple.empty").contains("The example has one made-up topic, Harborline."), e)
+                                        let exampleRun = asideProcess(asideQuery("Follow up on the Harborline quote"), home: emptyHome)
+                                        expect("the lookup command, asked while the example is on screen, knows nothing of it: \"unavailable\", an empty handoff, no Harborline", exampleRun.status == "unavailable" && exampleRun.reason == "sources_missing" && exampleRun.handoff.isEmpty && !exampleRun.text.contains("Harborline") && exampleRun.exit == 3, [exampleRun.text])
+                                        simple2.smokeExitExample()
+                                        e = simple2.smokeState()
+                                        expect("\"Exit example\" returns to the empty screen exactly as it was: no example, no banner, the offer back, an empty field, no preview, the ordinary title", value(e, "simple.example") == "false" && value(e, "simple.exampleBanner") == "hidden" && value(e, "simple.exampleOffer") == "Try a fictional example" && value(e, "simple.hint") == emptyHint && value(e, "simple.query").isEmpty && value(e, "simple.preview").isEmpty && value(e, "simple.title") == "Contexta Horizon" && value(e, "simple.copyEnabled") == "false" && value(e, "simple.status").isEmpty, e)
+                                        _ = picture(simple2.smokeWindow, "example-3-exited.png")
+                                        pictures += ["example-0-empty.png", "example-1-shown.png", "example-2-task.png", "example-3-exited.png"]
+                                        expect("entering, using and leaving the example read nothing, wrote nothing and changed no setting: the reader was never called, the empty home still does not exist, the settings store is untouched, nothing was copied, and no read was started", trace.events.isEmpty && !fm.fileExists(atPath: emptyHome.path) && emptyStore.values.isEmpty && value(e, "simple.copyCount") == "0" && dashboard2.smokeReads.asked == 1 && dashboard2.smokeHeld == "files:0 ai:0 mail:0 imports:0 | file:0 ai:0 mail:0", trace.events + ["settings: \(emptyStore.values.count)", "reads: \(dashboard2.smokeReads.asked)", dashboard2.smokeHeld])
+                                        finish()
+                                    }
+                                    simple2.show()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 25) { print("SMOKE FAIL  timed out"); try? fm.removeItem(at: temp); exit(1) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 60) { print("SMOKE FAIL  timed out"); try? fm.removeItem(at: temp); exit(1) }
     simple.show()
     app.run()
     exit(1)

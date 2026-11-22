@@ -1,31 +1,39 @@
-# What changed, and what the tests actually show
+# Verifying Horizon 0.5.2 (build 8)
 
-**Contexta Horizon 0.5.1 (build 7)** · Apple Silicon local preview, ad-hoc signed, not notarized. All inputs below are fictional. We measured the app's retrieval separately from a model's ability to use what it received.
+**Question:** When a user limits which records a new lookup may read, does Horizon enforce the limit before opening files? Can someone try a realistic preview without importing anything?
 
-| Measure | 0.5.0 | 0.5.1 |
-|---|---:|---:|
-| Target facts present in selected titles, four development tasks | 6/8 | 8/8 |
-| Target references in six separately held-out English/Korean cases | 9/10 | 10/10 |
-| Correct final answers, four development tasks, Qwen2.5-1.5B-Instruct | 2/4 | 2/4 |
-| Model calls across those tasks, including retries | 6 | 6 |
-| Total input + output tokens across the four tasks | 3,127 | 3,119 |
-| Two-record task, tokens through correct answer | 201 | 171 |
+All cases below use synthetic records. For the direct comparison, 0.5.1 and 0.5.2 were observed at the reader's metadata-check, file-open and imports-directory boundaries. These are instrumented code-boundary observations, not a claim that every OS system call was traced.
 
-**The comparison is with Horizon 0.5.0, not with ChatGPT or Claude.** Pasting the full list on the two-record task cost only 143 tokens. Identical model inputs reused their measured result; changed inputs used the same local model, temperature, seed and retry policy. [Per-round results and actual answers](Evaluation/0.5.1/rounds.json) · [Model and scoring protocol](Benchmark/README.md).
+| New lookup scenario | 0.5.1 | 0.5.2 |
+|---|---|---|
+| Every source off | Checked and opened all three fixture feeds, a mixed import and the manifest, then returned unavailable | No feed or manifest checked/opened; no imports-folder check or listing; returned unavailable |
+| Only AI chats on | Opened the same set before filtering | Opened only the AI feed and collection manifest |
+| All sources on | Returned the matching fictional topic | Returned the matching fictional topic |
 
-### Three changes, three checks
+[Baseline observations](Evaluation/0.5.2/baseline-matrix.json) · [All 16 current combinations](Evaluation/0.5.2/final-matrix.json)
 
-1. **Short handoffs:** remove repetitive headings on most small results; retain dates, types and warnings. With one Korean meeting question, compaction led the model to invent a time. Restoring the original small timing layout restored abstention on that case. This is not a general hallucination fix.
-2. **Diverse citations:** choose among reply and revision chains instead of blindly filling six places with recent variations. The 30-row Coralwick packet recovered the title containing the 17-unit limit and February review. The model still failed the two-part answer after a retry.
-3. **Status and corrections:** distinguish substantive holds and constraints from routine mentions. A targeted English/Korean stress probe recovered 4/4 requested status references versus 0/4 after round two. That probe informed the fix; it is **not** part of the held-out score. Distinct evidence with reused source-local IDs is preserved (6/6 in the collision regression).
+- **All 16 on/off combinations:** the dedicated source-file checks followed their switches. Imports could mix chat and mail, so only the two combinations with AI, Mail and Imports on enumerated that directory (Files may be either on or off).
+- **81 transitions** from a set of enabled sources to a subset, including unchanged sets: restricted cached evidence IDs exactly matched a fresh read. A dashboard race test also checked that stale results did not reappear.
+- **32 headless queries** on the installed, uninstrumented build: one fixture query and one demo-only query for each combination. No fictional demo content appeared, and the original fixture files were unchanged.
+- **Native UI:** empty window → enter labeled example → inspect file, AI and mail titles → exit. No source file, stored preference or clipboard changes in this check. The button was hidden on a nonempty query and in a populated workspace. Copy remained disabled in the demo.
+- **Release checks:** 62/62 synthetic self-tests, 18/18 static checks, fictional mailbox import passed, and the native-window flow passed. The application ZIP was unpacked, ad-hoc signature verified, and its executable matched the tested installation byte for byte.
 
-### Native checks
+### Reproduce locally
 
-- 58/58 synthetic self-tests, 16/16 static checks; the example mailbox imports on an empty profile.
-- Native window smoke: type, inspect, change topics, no match, change period, return. No clipboard write during the smoke run.
-- Independent synthetic fixture: the visible native preview matched the actual headless result byte for byte. The optional Aside helper uses that command, not a separate summarizer.
-- Distribution: arm64 executable, ad-hoc signature; the unpacked public ZIP verified locally. SHA-256 digests accompany the release.
+From the repository root with Swift and Node installed:
 
-**Limits:** one small model, constructed cases, titles rather than document bodies. Another probe still produced an unsupported conclusion about a signature. A missing confirmation is not evidence of non-signature. These experiments do not measure real-user time, API bills or provider-model accuracy. [Earlier 0.4.1 report](https://github.com/AgentChiChi/contexta-horizon/blob/v0.4.1/VERIFICATION.md).
+```sh
+bash build.sh
+PROBE=$(mktemp -d)
+node Evaluation/0.5.2/instrument.cjs . "$PROBE"
+node Evaluation/0.5.2/matrix.cjs "$PROBE/probe" final
+node Evaluation/0.5.2/installed-matrix.cjs "$PWD/dist/contexta-horizon.app/Contents/MacOS/ContextaHorizon"
+```
 
-The distributable is the previously verified app, not a new unsigned recompile. Its built-in self-test contains fictional redaction fixtures; a binary string scan therefore finds **synthetic** paths and addresses. The release ZIP was rebuilt from an allowlist (executable, Info.plist, signature) to exclude macOS extended-attribute sidecars. These checks do not imply Apple notarization or Gatekeeper approval.
+The probe is a separate test executable; the shipped app does not have that extra instrumentation. The scripts create temporary fictional homes, not live-account tests. [Cached/fresh comparison](Evaluation/0.5.2/Parity.swift).
+
+### What this doesn't establish
+
+A switch governs **new lookups**, not OS permissions, deletion, or explicit actions such as importing a file. A read already in flight uses the switches captured at its start; its output is restricted again before display. A title can still be sensitive. The standalone app doesn't call an AI provider. A manual paste or an optional Aside lookup can put titles into a hosted chat.
+
+No new model benchmark is claimed. All four synthetic benchmark handoffs were byte-identical to 0.5.1. The [earlier measurement](https://github.com/AgentChiChi/contexta-horizon/blob/v0.5.1/VERIFICATION.md) found 10/10 target references in six held-out cases but only 2/4 correct final answers on a separate four-task local-model benchmark. This update tests control over sources, not stronger reasoning, lower provider bills or real-user time savings.
