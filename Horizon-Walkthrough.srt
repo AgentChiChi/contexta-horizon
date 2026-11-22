@@ -1,0 +1,20 @@
+1
+00:00:00,000 --> 00:00:07,000
+Open Horizon from Finder or click its menu bar icon.
+The cursor starts in the task field.
+
+2
+00:00:07,000 --> 00:00:15,000
+Type a task that names your project.
+Here, Horizon matches Harborline in the local records.
+
+3
+00:00:15,000 --> 00:00:25,000
+Check the topic and the dated records.
+The preview is exactly what Copy will use, not an AI answer.
+
+4
+00:00:25,000 --> 00:00:33,000
+Click Copy to put the preview on your clipboard.
+You choose where to paste it. Nothing is sent automatically.
+

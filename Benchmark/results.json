@@ -1,0 +1,218 @@
+[
+  {
+    "id": "Asterline",
+    "n": 48,
+    "arm": "full",
+    "turns": [
+      {
+        "answer": "The latest dispatch note for Asterline specifies 48 cartons for pickup on Thursday.",
+        "pass": true,
+        "usage": {
+          "completion_tokens": 19,
+          "prompt_tokens": 1372,
+          "total_tokens": 1391,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      }
+    ],
+    "pass": true,
+    "total": 1391
+  },
+  {
+    "id": "Asterline",
+    "n": 48,
+    "arm": "compact",
+    "turns": [
+      {
+        "answer": "The latest dispatch note for Asterline specifies 48 cartons and a pickup on Thursday.",
+        "pass": true,
+        "usage": {
+          "completion_tokens": 20,
+          "prompt_tokens": 338,
+          "total_tokens": 358,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      }
+    ],
+    "pass": true,
+    "total": 358
+  },
+  {
+    "id": "Bellwater",
+    "n": 2,
+    "arm": "full",
+    "turns": [
+      {
+        "answer": "The proof request for Bellwater specifies a satin finish with a quantity of 125.",
+        "pass": true,
+        "usage": {
+          "completion_tokens": 20,
+          "prompt_tokens": 123,
+          "total_tokens": 143,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      }
+    ],
+    "pass": true,
+    "total": 143
+  },
+  {
+    "id": "Bellwater",
+    "n": 2,
+    "arm": "compact",
+    "turns": [
+      {
+        "answer": "The proof request for Bellwater specifies a satin finish with a quantity of 125.",
+        "pass": true,
+        "usage": {
+          "completion_tokens": 20,
+          "prompt_tokens": 181,
+          "total_tokens": 201,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      }
+    ],
+    "pass": true,
+    "total": 201
+  },
+  {
+    "id": "Coralwick",
+    "n": 30,
+    "arm": "full",
+    "turns": [
+      {
+        "answer": "The requested facts are missing.",
+        "pass": false,
+        "usage": {
+          "completion_tokens": 7,
+          "prompt_tokens": 884,
+          "total_tokens": 891,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      },
+      {
+        "answer": "The requested facts are missing.",
+        "pass": false,
+        "usage": {
+          "completion_tokens": 7,
+          "prompt_tokens": 1733,
+          "total_tokens": 1740,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      }
+    ],
+    "pass": false,
+    "total": 2631
+  },
+  {
+    "id": "Coralwick",
+    "n": 30,
+    "arm": "compact",
+    "turns": [
+      {
+        "answer": "The records do not provide specific information about the number of items permitted or when the team should revisit that decision for Coralwick.",
+        "pass": false,
+        "usage": {
+          "completion_tokens": 26,
+          "prompt_tokens": 339,
+          "total_tokens": 365,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      },
+      {
+        "answer": "The records do not provide specific information about the number of items permitted or when the team should revisit that decision for Coralwick.",
+        "pass": false,
+        "usage": {
+          "completion_tokens": 26,
+          "prompt_tokens": 1207,
+          "total_tokens": 1233,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      }
+    ],
+    "pass": false,
+    "total": 1598
+  },
+  {
+    "id": "Dunhaven",
+    "n": 9,
+    "arm": "full",
+    "turns": [
+      {
+        "answer": "The records do not establish that the agreement was signed.",
+        "pass": false,
+        "usage": {
+          "completion_tokens": 12,
+          "prompt_tokens": 312,
+          "total_tokens": 324,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      },
+      {
+        "answer": "The records do not establish that the agreement was signed.",
+        "pass": false,
+        "usage": {
+          "completion_tokens": 12,
+          "prompt_tokens": 592,
+          "total_tokens": 604,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      }
+    ],
+    "pass": false,
+    "total": 928
+  },
+  {
+    "id": "Dunhaven",
+    "n": 9,
+    "arm": "compact",
+    "turns": [
+      {
+        "answer": "The records do not establish that the agreement was signed.",
+        "pass": false,
+        "usage": {
+          "completion_tokens": 12,
+          "prompt_tokens": 333,
+          "total_tokens": 345,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      },
+      {
+        "answer": "The records do not establish that the agreement was signed.",
+        "pass": false,
+        "usage": {
+          "completion_tokens": 12,
+          "prompt_tokens": 613,
+          "total_tokens": 625,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      }
+    ],
+    "pass": false,
+    "total": 970
+  }
+]

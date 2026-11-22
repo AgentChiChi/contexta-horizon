@@ -1,0 +1,4 @@
+  Duration: 00:00:33.00, start: 0.000000, bitrate: 610 kb/s
+  Stream #0:0(und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709), 1920x1080, 608 kb/s, 12 fps, 12 tbr, 12288 tbn, 24 tbc (default)
+Decoded all 396 frames without error (caption-led, no audio track).
+f007df93511af7e8d26856ccf3a75defc2968e33fddb5c7995ebb5d9061c6d32  contexta-horizon-0.4.1-walkthrough-en.mp4
