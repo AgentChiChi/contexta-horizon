@@ -10,12 +10,12 @@ Now you know what to do next: open that thread before promising a date. Or, if y
 
 **0.4.1 English preview** · Apple Silicon · macOS 13+ deployment target · ad-hoc signed, not Apple-notarized.
 
-- [Download the Mac app](https://github.com/zakat9/contexta-horizon/releases/download/v0.4.1/Contexta-Horizon-0.4.1-macOS-arm64.zip)
-- [Watch the English walkthrough (MP4)](https://github.com/zakat9/contexta-horizon/blob/v0.4.1/Horizon-Walkthrough.mp4)
-- [Read the setup and usage guide](https://github.com/zakat9/contexta-horizon/blob/v0.4.1/GUIDE.md)
-- [Read the verification report](https://github.com/zakat9/contexta-horizon/blob/v0.4.1/VERIFICATION.md)
+- [Download the Mac app](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.4.1/Contexta-Horizon-0.4.1-macOS-arm64.zip)
+- [Watch the English walkthrough (MP4)](https://github.com/AgentChiChi/contexta-horizon/blob/v0.4.1/Horizon-Walkthrough.mp4)
+- [Read the setup and usage guide](https://github.com/AgentChiChi/contexta-horizon/blob/main/GUIDE.md)
+- [Read the verification report](https://github.com/AgentChiChi/contexta-horizon/blob/v0.4.1/VERIFICATION.md)
 - [Source code](Sources/) · [Reproducible benchmark](Benchmark/) · [Fictional sample](Demo/Harborline-Demo.mbox)
-- [Release notes and checksums](https://github.com/zakat9/contexta-horizon/releases/tag/v0.4.1)
+- [Release notes and checksums](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.4.1)
 
 ### What Horizon keeps in view
 
@@ -27,7 +27,7 @@ You see the exact text before you copy it. Nothing is sent to an AI service auto
 
 The release passed 40/40 synthetic app tests and 15/15 static checks. We also checked the native window flow, an empty-profile import and the downloadable ZIP.
 
-A shorter handoff can save tokens, but not always: on a 48-record task, both answers were correct and Horizon used 358 tokens instead of 1,391; on a two-record task, it used 201 instead of 143. Both approaches passed only two of four fictional tasks. The [full report](https://github.com/zakat9/contexta-horizon/blob/v0.4.1/VERIFICATION.md) includes the failures, retries and limits of this local-model test.
+A shorter handoff can save tokens, but not always: on a 48-record task, both answers were correct and Horizon used 358 tokens instead of 1,391; on a two-record task, it used 201 instead of 143. Both approaches passed only two of four fictional tasks. The [full report](https://github.com/AgentChiChi/contexta-horizon/blob/v0.4.1/VERIFICATION.md) includes the failures, retries and limits of this local-model test.
 
 ## Build from source
 

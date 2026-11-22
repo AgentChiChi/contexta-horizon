@@ -4,7 +4,7 @@ Horizon prepares a short, dated list of references for a task you want to resume
 
 ## Install
 
-1. Download **Contexta-Horizon-0.4.1-macOS-arm64.zip** from the [Horizon release](https://github.com/zakat9/contexta-horizon/releases/tag/v0.4.1). The prebuilt app requires an Apple Silicon Mac and targets macOS 13 or later. Intel and older macOS versions have not been verified.
+1. Download **Contexta-Horizon-0.4.1-macOS-arm64.zip** from the [Horizon release](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.4.1). The prebuilt app requires an Apple Silicon Mac and targets macOS 13 or later. Intel and older macOS versions have not been verified.
 2. To check the download, run `shasum -a 256 Contexta-Horizon-0.4.1-macOS-arm64.zip` and compare it to `SHA256SUMS.txt` on the release page.
 3. Unzip the archive, move `contexta-horizon.app` to Applications, then open it. If upgrading Horizon, quit the old copy and replace that same app.
 4. The preview is ad-hoc signed, **not Apple-notarized**. macOS may block it. Do not disable Gatekeeper. If you do not trust the download, stop or inspect and build the attached source instead.
@@ -23,10 +23,10 @@ The default period is the last three calendar months. Use **Sources & Settings**
 
 ## What the demo and tests cover
 
-The [walkthrough](https://github.com/zakat9/contexta-horizon/blob/v0.4.1/Horizon-Walkthrough.mp4) uses actual native app views with fictional data and English captions. It is not a live AI exchange. Read **VERIFICATION.md** for exact tested behavior, the full-task token benchmark and its limitations. No private indexes, accounts, emails or model weights are included in the app.
+The [walkthrough](https://github.com/AgentChiChi/contexta-horizon/blob/v0.4.1/Horizon-Walkthrough.mp4) uses actual native app views with fictional data and English captions. It is not a live AI exchange. Read **VERIFICATION.md** for exact tested behavior, the full-task token benchmark and its limitations. No private indexes, accounts, emails or model weights are included in the app.
 
 ### Try it without exposing any personal records
 
-Download [Harborline-Demo.mbox](https://github.com/zakat9/contexta-horizon/releases/download/v0.4.1/Harborline-Demo.mbox). In **Sources & Settings → Import…**, select the mailbox, confirm the import, then click **‹ Simple View**. Type **Harborline quote**. The prepared demo has three fictional mail records; the video uses a separate fixture that also has file and AI references.
+Download [Harborline-Demo.mbox](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.4.1/Harborline-Demo.mbox). In **Sources & Settings → Import…**, select the mailbox, confirm the import, then click **‹ Simple View**. Type **Harborline quote**. The prepared demo has three fictional mail records; the video uses a separate fixture that also has file and AI references.
 
 The downloadable sample is dated around the release. If it has aged out of the current period, use a custom period covering **November 19–21, 2026**, or make a fresh sample with `bash Demo/make-sample.sh > /tmp/Harborline-today.mbox` from the extracted source ZIP. Import the new file. No personal mail account is needed.
