@@ -1,4 +1,17 @@
-# Verifying Horizon 0.5.2 (build 8)
+# Verifying Horizon 0.5.3 (build 10)
+
+**What changed:** one explicit Read Sources action, a responsive window while sources load, and the same -C- mark in Finder and the menu bar. Build 10 replaces build 9’s artwork without changing source-reading or Mail behavior.
+
+| Synthetic or artifact check | Result |
+|---|---|
+| Final app self-tests, static checks and native AppKit smoke | 64/64, 19/19 and 63/63. The smoke included delayed reads, typing, repeat clicks, stale-result filtering and mocked Mail consent, refusal and success. No real mailbox or clipboard was used. |
+| Reopen while a synthetic read was held (0.5.3 build 9, unchanged window code in build 10) | 10 fresh processes per version; five reopens per process. All 50 returned before release of the read on **both** versions. Actual reads per trial fell from six on 0.5.2 to one on 0.5.3; typed text and focus survived. This measures the controller, not Finder event delivery. |
+| Installed build 10 lookup | 32 synthetic queries over all 16 source-switch combinations; no built-in example leaked into a lookup. |
+| Icon and package | The plist identifies AppIcon; the bundled ICNS contains ten representations. The Finder artwork and 18-point template use the approved [vector](Icon/mark.svg). The executable and icon in the release ZIP matched the local installation byte for byte. |
+
+**Limits:** Live Mail, the real macOS Automation prompt, and the icon cache on another Mac were not tested. The app is ad-hoc signed, not Apple-notarized. No new model benchmark was run.
+
+## Previous release: 0.5.2 (build 8)
 
 **Question:** When a user limits which records a new lookup may read, does Horizon enforce the limit before opening files? Can someone try a realistic preview without importing anything?
 

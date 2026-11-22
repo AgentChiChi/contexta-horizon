@@ -1,12 +1,20 @@
+<img src="docs/media/horizon-c-icon.png" alt="Contexta Horizon: a mint -C- on dark ink" width="96" height="96">
+
 # Contexta Horizon for Mac
 
 **New chat. Same project.** Pick up the thread in ChatGPT, Claude or Aside without pasting your entire history. Horizon brings dated references from your local file lists, earlier AI chats and mail into one Mac menu bar preview. You decide which conversation gets them.
 
-**[Download for Apple Silicon](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/Contexta-Horizon-0.5.2-macOS-arm64.zip)** · [Get started](GUIDE.md) · [0.5.2 release](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.2)
+**[Download for Apple Silicon](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/Contexta-Horizon-0.5.3-macOS-arm64.zip)** · [Get started](GUIDE.md) · [0.5.3 release](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.3)
 
 macOS 13+ · Apple Silicon · **Public preview, ad-hoc signed and not Apple-notarized.** If your Mac blocks it, leave Gatekeeper enabled. See the [installation guide](GUIDE.md).
 
-**Watch: New chat. Same project.** (39 seconds, sound off)
+### What’s new in 0.5.3
+
+Look for **-C-** in your menu bar: the left line meets Contexta’s C, and the line on the right picks up the thread. [Finder and menu bar icon previews](Icon/icon-preview.png) · [Vector source](Icon/mark.svg)
+
+Open Horizon and start typing while your sources load. Reopening the window joins the read already in progress instead of starting over. In **Sources & Settings**, **Read Sources** replaces the two old read buttons. It starts with local sources; adding recent subjects and dates from an already-open Mail app requires your confirmation. [When Mail is offered](GUIDE.md#what-a-source-switch-does)
+
+**Watch: New chat. Same project.** (39 seconds, filmed in 0.5.2; the icon and settings toolbar have since changed)
 
 https://github.com/user-attachments/assets/4b900293-a088-4993-8a61-5ab2aa388ffa
 
@@ -22,7 +30,7 @@ Horizon shows you the dates and source types. It doesn't read a contract and dec
 
 1. Open Horizon on a fresh install. In the empty view with nothing typed, choose **Try a fictional example**. No sign-in, mailbox import or model needed for the demo.
 2. Inspect the Harborline references, then choose **Exit example**. The demo lives in memory. **Copy is off**, and the example doesn't become one of your projects.
-3. To try the actual handoff without personal data, import the [fictional mailbox](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/sample-mail.mbox) from **Sources & Settings → Import…**. Return to the simple view and type **“Follow up on the Harborline quote.”**
+3. To try the actual handoff without personal data, import the [fictional mailbox](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/sample-mail.mbox) from **Sources & Settings → Import…**. Return to the simple view and type **“Follow up on the Harborline quote.”**
 
 ### Two ways to resume work
 
@@ -34,15 +42,15 @@ Horizon shows you the dates and source types. It doesn't read a contract and dec
 
 ## What changes when you turn a source off?
 
-In 0.5.1, switching a source off filtered the result after the feeds were read. In **0.5.2**, a new lookup doesn't open a disabled file, chat or mail feed. Imports may mix chat and mail records, so the entire imports folder is skipped unless **Imports, AI chats and Mail** are all on. Skipped doesn't mean empty. Explicit imports and Mail collection are separate actions. [Details and limits](GUIDE.md#what-a-source-switch-does)
+In 0.5.1, switching a source off filtered the result after the feeds were read. Since **0.5.2**, a new lookup doesn't open a disabled file, chat or mail feed. Imports may mix chat and mail records, so the entire imports folder is skipped unless **Imports, AI chats and Mail** are all on. Skipped doesn't mean empty. A manual file import is separate; collecting new items from Mail requires opting in under Read Sources. [Details and limits](GUIDE.md#what-a-source-switch-does)
 
 ## What we tested
 
-- **16 switch combinations:** with every source off, no source file was checked or opened and the imports directory wasn't listed. With only AI on, the reader opened the AI feed and the shared collection manifest, not the file or mail feeds.
-- **81 switch-off transitions:** cached evidence matched a fresh read every time. Previously loaded mixed imports didn't linger in the results.
-- **32 queries against the installed app:** fictional demo records never appeared in a lookup. Opening and exiting the demo changed no fixture files, preferences or clipboard in the native-window test.
+- **50 of 50** simulated reopens returned before a delayed local read finished. Reopening five times started one read in 0.5.3, versus six in 0.5.2; the typed task stayed intact.
+- **64/64** synthetic app checks, **19/19** static checks and **63** native-window smoke steps passed on build 10. Mail permission and collection scenarios were mocked; no personal mailbox was tested.
+- The application ZIP contains the tested executable and the ten-size Finder icon. The menu bar uses the same path as an 18-point macOS template.
 
-These are **source-control and isolation tests**, not model accuracy scores. The four earlier benchmark handoffs stayed byte-identical. In the earlier local-model run, correct final answers were **2 of 4**; we do not claim that 0.5.2 improves that score or reduces your API bill. [Verification and reproducible checks](VERIFICATION.md)
+These checks measure app behavior, not AI answer quality. [Verification and limits](VERIFICATION.md)
 
 ### Build from source
 

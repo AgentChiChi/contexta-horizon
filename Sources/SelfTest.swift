@@ -2,8 +2,9 @@
 // Fast, deterministic and offline. Everything is fictional and made in a temporary folder (a pretend home), removed at
 // the end. It opens no window, reads no real ~/WorkIndex, touches no clipboard and no settings, and never asks the
 // Mail app anything (the Mail adapter is tested with its Mac side passed in). The programs it starts are a synthetic
-// refresh.command it wrote itself in that temporary folder, and this same executable with --aside-lookup (the headless
-// lookup, pointed at the temporary folder, with every setting given on its command line).
+// refresh.command it wrote itself in that temporary folder, this same executable with --aside-lookup (the headless
+// lookup, pointed at the temporary folder, with every setting given on its command line), and the system's script
+// runner with four tiny fixed scripts that address no app (to check the helper the Mail step uses).
 
 import AppKit
 import Foundation
@@ -903,6 +904,56 @@ func runSelfTest() -> Int32 {
           "\(fictionEvents.count) events // " + fictionText + " // " + AsideLookup.json(emptyAnswer))
     trace.stop()
 
+    // ── 0.5.3: "Read Sources" and Mail — the decision, with the Mac's side mocked ──
+    var stepFailures: [String] = []
+    for mask in 0..<16 {
+        let on = Set(SourceKind.allCases.enumerated().filter { mask & (1 << $0.offset) != 0 }.map { $0.element })
+        let m = MailMock(); m.set(running: true)
+        let step = MailAdapter.step(enabled: on, underway: false, isRunning: m.side.isRunning)
+        let allOn = on.isSuperset(of: [.imports, .ai, .mail])
+        if allOn ? !(step == .ask && m.counts.running == 1) : !(step == .skip("Imports, AI chats and Mail are not all switched on") && m.counts.running == 0) { stepFailures.append("mask \(mask): \(step) asked \(m.counts.running)") }
+        if MailAdapter.mayKeep(on) != allOn { stepFailures.append("mask \(mask): mayKeep") }
+    }
+    let mailQuiet = MailMock(); mailQuiet.set(running: false)
+    let stepNotRunning = MailAdapter.step(enabled: all, underway: false, isRunning: mailQuiet.side.isRunning)
+    let busyMock = MailMock(); busyMock.set(running: true)
+    let stepUnderway = MailAdapter.step(enabled: all, underway: true, isRunning: busyMock.side.isRunning)
+    func outcome(_ configure: (MailMock) -> Void) -> (MailAdapter.Outcome, Int, (running: Int, permission: Int, run: Int, onMain: Int)) {
+        let m = MailMock(); configure(m)
+        let got = MailAdapter.collect(isRunning: m.side.isRunning, permission: m.side.permission, run: m.side.run)
+        return (got.outcome, got.rows.count, m.counts)
+    }
+    let oDenied = outcome { $0.set(running: true, permission: -1743) }, oQuit = outcome { $0.set(running: false) }, oTimeout = outcome { $0.set(running: true, reply: .some(nil), error: -1712) }
+    let oBlocked = outcome { $0.set(running: true, reply: .some(nil), error: MailAdapter.refusedOnMainThread) }
+    let oGood = outcome { $0.set(running: true, reply: MailMock.reply([("I", "<k1@mail.example>", real.addingTimeInterval(-86400), "Harborline note"), ("S", "<k2@mail.example>", real.addingTimeInterval(-2 * 86400), "Atlas reply")])) }
+    check("H63", "what \"Read Sources\" does about Mail is decided before anything of Mail is touched: in the 15 switch combinations where Imports, AI chats and Mail are not all on, Mail is left out with that reason and not even \"is Mail running?\" is asked; the same when a collection is already under way; with all three on and Mail not running it is left out and Mail is not opened; only with all three on and Mail running is the person asked. What was collected may be kept only while all three are still on. After a yes: macOS refusing gives \"Permission denied\" and the script is not run; Mail having quit gives \"not running\" with nothing asked of macOS; a timeout and a refused main-thread call are reported as they are; a good answer becomes rows. The script itself now stops, rather than starts Mail, when Mail is not running",
+          stepFailures.isEmpty && stepNotRunning == .skip("Mail is not running, and Horizon never opens it") && mailQuiet.counts == (1, 0, 0, 0) && stepUnderway == .skip("a Mail collection is already under way") && busyMock.counts.running == 0 &&
+          oDenied.0 == .denied && oDenied.2.run == 0 && oDenied.2.permission == 1 && oQuit.0 == .notRunning && oQuit.2.permission == 0 && oQuit.2.run == 0 && oTimeout.0 == .unavailable("Mail did not answer in time (timed out)") &&
+          oBlocked.0 == .unavailable("not asked (the request would have blocked the window)") && oGood.0 == .collected(inbox: 1, sent: 1, inboxTotal: 1, sentTotal: 1, skipped: 0) && oGood.1 == 2 && oGood.2.run == 1 &&
+          MailAdapter.script(cap: 200).hasPrefix("if application id \"com.apple.mail\" is not running then error number -600\n") && MailAdapter.helper == "/usr/bin/osascript",
+          stepFailures.joined(separator: " | ") + " \(stepNotRunning) \(stepUnderway) \(oDenied.0) \(oQuit.0) \(oTimeout.0) \(oBlocked.0) \(oGood.0)")
+    // the helper process: the system's script runner, given tiny fixed scripts that address no app at all
+    let onMain = MailAdapter.osascript("return 1", timeout: 5)
+    var helperText: (reply: String?, error: Int) = (nil, 0), helperDenied: (reply: String?, error: Int) = (nil, 0), helperQuit: (reply: String?, error: Int) = (nil, 0), helperSlow: (reply: String?, error: Int) = (nil, 0), slowTook = 0.0
+    let helperDone = DispatchSemaphore(value: 0)
+    DispatchQueue.global(qos: .userInitiated).async {
+        helperText = MailAdapter.osascript("set sep to character id 31\nreturn \"I\" & sep & \"<x@y>\" & sep & \"한글 제목\" & linefeed & \"second line\"", timeout: 10)
+        helperDenied = MailAdapter.osascript("error number -1743", timeout: 10)
+        helperQuit = MailAdapter.osascript("error number -600", timeout: 10)
+        let began = Date()
+        helperSlow = MailAdapter.osascript("delay 8\nreturn \"late\"", timeout: 0.6)
+        slowTook = Date().timeIntervalSince(began)
+        helperDone.signal()
+    }
+    let helperFinished = helperDone.wait(timeout: .now() + 30) == .success
+    let parsedDenied = MailAdapter.helperResult(status: 1, timedOut: false, output: Data(), errors: Data("0:5: execution error: Mail got an error: Not authorized to send Apple events to Mail. (-1743)\n".utf8))
+    let parsedOdd = MailAdapter.helperResult(status: 1, timedOut: false, output: Data(), errors: Data("something else went wrong".utf8)), parsedGood = MailAdapter.helperResult(status: 0, timedOut: false, output: Data("a\nb\n".utf8), errors: Data())
+    check("H64", "the script runs in a helper process, never in the app and never on the main thread: asked on the main thread the helper refuses at once and starts nothing; off it, the system's script runner gets the script on standard input and its answer comes back intact (the separator character, Korean text and line breaks included); an AppleScript error number comes back as that number (-1743 refused, -600 not running); and a script that does not answer is stopped when the time is up and reported as a timeout, well before it would have finished",
+          onMain.reply == nil && onMain.error == MailAdapter.refusedOnMainThread && helperFinished && helperText.reply == "I\u{1F}<x@y>\u{1F}한글 제목\nsecond line" && helperText.error == 0 &&
+          helperDenied.reply == nil && helperDenied.error == -1743 && helperQuit.error == -600 && helperSlow.reply == nil && helperSlow.error == -1712 && slowTook < 4 &&
+          parsedDenied.reply == nil && parsedDenied.error == -1743 && parsedOdd.error == 0 && parsedOdd.reply == nil && parsedGood.reply == "a\nb" && MailAdapter.helperResult(status: 0, timedOut: true, output: Data("x".utf8), errors: Data()).error == -1712,
+          "main=\(onMain) text=\(String(describing: helperText.reply)) denied=\(helperDenied.error) quit=\(helperQuit.error) slow=\(helperSlow.error) in \(slowTook)s")
+
     // ── settings and manifest ──
     let store = MemoryStore(), prefs = Preferences(store: store)
     let d0 = prefs.months, on0 = prefs.enabled
@@ -922,6 +973,37 @@ func runSelfTest() -> Int32 {
     print("\n== \(passed)/\(passed + failed) Horizon self-test checks passed ==")
     print("Synthetic data in a temporary folder only. Not checked here: the menu-bar item, dialogs, real sources, the real Mail app, a real refresh tool.")
     return failed == 0 ? 0 : 1
+}
+
+/// A stand-in for the Mac's side of a Mail collection: it counts every question, remembers whether any came on the
+/// main thread, and answers as told. The real Mail app is never involved.
+final class MailMock {
+    private let lock = NSLock()
+    private var asked = (running: 0, permission: 0, run: 0, onMain: 0)
+    private var answers = (running: false, permission: 0, reply: String?.some(""), error: 0, delay: 0.0)
+    func set(running: Bool? = nil, permission: Int? = nil, reply: String?? = nil, error: Int? = nil, delay: Double? = nil) {
+        lock.lock(); defer { lock.unlock() }
+        if let v = running { answers.running = v }; if let v = permission { answers.permission = v }; if let v = reply { answers.reply = v }; if let v = error { answers.error = v }; if let v = delay { answers.delay = v }
+    }
+    var counts: (running: Int, permission: Int, run: Int, onMain: Int) { lock.lock(); defer { lock.unlock() }; return asked }
+    var side: MailAdapter.Side {
+        MailAdapter.Side(isRunning: { [self] in lock.lock(); defer { lock.unlock() }; asked.running += 1; return answers.running },
+                         permission: { [self] in lock.lock(); defer { lock.unlock() }; asked.permission += 1; if Thread.isMainThread { asked.onMain += 1 }; return answers.permission },
+                         run: { [self] _ in
+                             lock.lock(); asked.run += 1; if Thread.isMainThread { asked.onMain += 1 }; let a = answers; lock.unlock()
+                             if a.delay > 0 { Thread.sleep(forTimeInterval: a.delay) }
+                             return (a.reply, a.error) })
+    }
+    static func reply(_ rows: [(box: String, id: String, date: Date, subject: String)]) -> String {
+        let sep = "\u{1F}", f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        var out = ""
+        for box in ["I", "S"] {
+            let mine = rows.filter { $0.box == box }
+            out += ["N", box, String(mine.count)].joined(separator: sep) + "\n"
+            for r in mine { out += [box, r.id, f.string(from: r.date), r.subject].joined(separator: sep) + "\n" }
+        }
+        return out
+    }
 }
 
 /// What the reader actually reached for on disk, recorded through Reader.probe: one entry for every file it is about
@@ -1058,6 +1140,9 @@ func runSampleCheck(_ path: String) -> Int32 {
     dashboard.onChange = { simple.refresh() }
     dashboard.onBack = { simple.show() }
     dashboard.onUseTopic = { key in simple.show(pick: key) }
+    let mock = MailMock()                                              // the Mac's Mail side: every question is counted; the real Mail app is never involved
+    dashboard.mailSide = mock.side
+    dashboard.onBackgroundRead = { Thread.sleep(forTimeInterval: 1.2) }  // the first read is made slow, to watch the windows while it runs
     var failures: [String] = []
     func expect(_ name: String, _ ok: Bool, _ detail: [String] = []) { print((ok ? "ok    " : "FAIL  ") + name); if !ok { failures.append(name); detail.forEach { print("        " + $0) } } }
     func picture(_ window: NSWindow, _ name: String) -> Bool {
@@ -1079,6 +1164,7 @@ func runSampleCheck(_ path: String) -> Int32 {
             expect("launch opens the simple screen with the field focused; the dashboard stays closed", simple.smokeWindow.isVisible && !dashboard.smokeWindow.isVisible && value(st, "simple.fieldFocused") == "true", st)
             expect("with nothing typed: two suggested topics, none chosen, no preview, Copy off", value(st, "simple.suggestions") == "Harborline · 4 | Atlas · 2" && value(st, "simple.copyEnabled") == "false" && value(st, "simple.preview").isEmpty && value(st, "simple.empty").hasPrefix("Choose a topic or type a task."), st)
             expect("the caption names the period and what to be careful about (a stale, partial AI feed)", value(st, "simple.caption").hasPrefix("Period: 3 months · ") && value(st, "simple.caption").contains("Source caution: AI chats: stale, partial"), st)
+            expect("when the read is done the spinner stops and \"reading\" is gone; launch and the reopenings asked nothing of the Mail side and put no question", value(st, "simple.loading") == "false" && value(st, "simple.spinner") == "false" && mock.counts == (0, 0, 0, 0) && dashboard.smokeMail.asks == 0 && dashboard.smokeReads.asked == 1 && dashboard.smokeReads.stale == 0, st)
             expect("with records in view the fictional example is not offered", value(st, "simple.exampleOffer") == "hidden" && value(st, "simple.exampleBanner") == "hidden" && value(st, "simple.example") == "false", st)
             _ = picture(simple.smokeWindow, "simple-1-start.png")
             // 2. type a task: suggestions ranked, the best match previewed with the task (identifier redacted)
@@ -1122,7 +1208,7 @@ func runSampleCheck(_ path: String) -> Int32 {
             // 6. Sources & Settings: the dashboard with its options; the custom period; back
             simple.smokeOpenAdvanced()
             var ds = dashboard.smokeState()
-            expect("Sources & Settings opens the dashboard with every option (period, sources, imports, Mail, refresh)", dashboard.smokeWindow.isVisible && value(ds, "title") == "Contexta Horizon — Sources & Settings" && value(ds, "period").hasSuffix("[3 months,6 months,Custom]") && value(ds, "buttons") == "Reread Sources,Import…,Collect from Mail…,Refresh Feeds…,Open in Simple View" && value(ds, "topics") == "2", ds)
+            expect("Sources & Settings opens the dashboard with every option, and one \"Read Sources\" button where \"Reread Sources\" and \"Collect from Mail…\" were (period, sources, read, imports, refresh)", dashboard.smokeWindow.isVisible && value(ds, "title") == "Contexta Horizon — Sources & Settings" && value(ds, "period").hasSuffix("[3 months,6 months,Custom]") && value(ds, "buttons") == "Read Sources,Import…,Refresh Feeds…,Open in Simple View" && value(ds, "topics") == "2", ds)
             _ = picture(dashboard.smokeWindow, URL(fileURLWithPath: out).lastPathComponent)
             let cal = Calendar.current
             dashboard.smokeApplyCustom(start: now.addingTimeInterval(-30 * 86400), end: now.addingTimeInterval(-9 * 86400))
@@ -1175,11 +1261,11 @@ func runSampleCheck(_ path: String) -> Int32 {
             dashboard.smokeBack()
             st = simple.smokeState()
             expect("\"Simple View\" shows the simple screen again; through the whole run nothing was copied", simple.smokeWindow.isVisible && value(st, "simple.copyCount") == "0", st)
-            var pictures = ["simple-1-start.png", "simple-2-typed.png", "simple-3-picked.png", "simple-4-no-match.png", "simple-5-back-from-settings.png", "window-custom-synthetic.png", URL(fileURLWithPath: out).lastPathComponent]
+            var pictures = ["loading-simple.png", "loading-dashboard.png", "menu-glyph-in-app.png", "simple-1-start.png", "simple-2-typed.png", "simple-3-picked.png", "simple-4-no-match.png", "simple-5-back-from-settings.png", "window-custom-synthetic.png", URL(fileURLWithPath: out).lastPathComponent]
             let finish: () -> Never = {
                 expect("pictures saved: " + pictures.joined(separator: ", "), pictures.allSatisfy { fm.fileExists(atPath: folder.appendingPathComponent($0).path) })
                 try? fm.removeItem(at: temp)
-                print(failures.isEmpty ? "SMOKE PASS  launch → type → preview → Return → pick another → no match (no copy) → Sources & Settings → custom period → back → switches gate what is read (off, on, races, all off) → fictional example entered and left on an empty home, on synthetic data; the clipboard was never written" : "SMOKE FAIL  " + failures.joined(separator: "; "))
+                print(failures.isEmpty ? "SMOKE PASS  launch → type → preview → Return → pick another → no match (no copy) → Sources & Settings → custom period → back → switches gate what is read (off, on, races, all off) → one Read Sources button with the Mail question as a sheet (mocked Mail side) → off-main recomputation → fictional example entered and left on an empty home; windows were on screen while the first read was still running, on synthetic data; the clipboard was never written" : "SMOKE FAIL  " + failures.joined(separator: "; "))
                 exit(failures.isEmpty ? 0 : 1)
             }
             /// Runs `body` shortly after the next read whose answer the dashboard keeps (stale answers never call back).
@@ -1239,6 +1325,7 @@ func runSampleCheck(_ path: String) -> Int32 {
                                     expect("turning all four on in quick succession: every earlier answer is dropped as stale, the last one is kept, and everything is back", r4.asked == r3.asked + 4 && r4.stale == r3.stale + 3 && !r4.busy && dashboard.smokeHeld == full && dashboard.smokeTopicKeys == ["harborline", "atlas"] && value(s8, "simple.exampleOffer") == "hidden", ["asked \(r3.asked)→\(r4.asked) stale \(r3.stale)→\(r4.stale)", dashboard.smokeHeld] + s8)
                                     _ = picture(dashboard.smokeWindow, "window-switches-restored.png"); pictures.append("window-switches-restored.png")
 
+                                    let phase8: () -> Void = {
                                     // 8. the fictional example, on an EMPTY home (no WorkIndex at all), in its own pair of windows
                                     simple.smokeWindow.orderOut(nil); dashboard.smokeWindow.orderOut(nil)
                                     let emptyHome = temp.appendingPathComponent("empty-home", isDirectory: true)
@@ -1287,6 +1374,115 @@ func runSampleCheck(_ path: String) -> Int32 {
                                         finish()
                                     }
                                     simple2.show()
+                                    }
+                                    // 7b. one "Read Sources" button. Mail only through its sheet; the Mail side is the counting mock.
+                                    let importCount: () -> Int = { ((try? FileManager.default.contentsOfDirectory(atPath: places.imports.path)) ?? []).filter { $0.hasSuffix(".jsonl") }.count }
+                                    let afterApplied: (HorizonController, @escaping () -> Void) -> Void = { d, body in d.onApplied = { d.onApplied = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { body() } } }
+                                    let later: (Double, @escaping () -> Void) -> Void = { seconds, body in DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { body() } }
+                                    expect("up to here — launch, reopening, switches, rereads, the races — nothing was ever asked of the Mail side", mock.counts == (0, 0, 0, 0) && dashboard.smokeMail.asks == 0, ["\(mock.counts)"])
+                                    // three quick presses during a slow read, Mail not running
+                                    dashboard.onBackgroundRead = { Thread.sleep(forTimeInterval: 0.5) }
+                                    let rA = dashboard.smokeReads, jA = dashboard.smokeJoinedPresses
+                                    trace.reset()
+                                    afterRead(dashboard) {
+                                        dashboard.onBackgroundRead = nil
+                                        var dm = dashboard.smokeState()
+                                        expect("\"Read Sources\" pressed three times in a row is one read (the later presses join it); with the Mail app not running the local sources are read alone, the status line says why Mail is not part of it, no question is put, and neither macOS nor Mail is asked anything", dashboard.smokeReads.asked == rA.asked + 1 && dashboard.smokeJoinedPresses == jA + 2 && trace.touched(places.preindex) == 1 && trace.touched(places.ai) == 1 && trace.touched(places.mail) == 1 && trace.under(places.imports) == 2 && value(dm, "status").hasPrefix("Mail not included: Mail is not running, and Horizon never opens it · Sources read: ") && mock.counts.permission == 0 && mock.counts.run == 0 && dashboard.smokeMail.asks == 0 && !dashboard.smokeMail.sheetUp && dashboard.smokeHeld == full, dm + ["reads \(rA.asked)→\(dashboard.smokeReads.asked) joined \(dashboard.smokeJoinedPresses - jA)", "\(mock.counts)"])
+                                        // Mail switched off: Mail is not even asked whether it runs
+                                        mock.set(running: true)
+                                        dashboard.smokeToggle(.mail, false)
+                                        let cB = mock.counts
+                                        afterRead(dashboard) {
+                                            dm = dashboard.smokeState()
+                                            expect("with the Mail switch off, \"Read Sources\" reads the local sources that are on and leaves Mail out without even asking whether it is running", mock.counts == cB && dashboard.smokeMail.asks == 0 && value(dm, "status").hasPrefix("Mail not included: Imports, AI chats and Mail are not all switched on · Sources read: ") && dashboard.smokeHeld == "files:3 ai:5 mail:0 imports:0 | file:3 ai:5 mail:0", dm + ["\(mock.counts)"])
+                                            afterRead(dashboard) {
+                                                // all on, Mail running: the question — as a sheet — and a second press while it is up
+                                                afterRead(dashboard) {
+                                                    let up = dashboard.smokeMail, sheetText = dashboard.smokeSheetText
+                                                    dashboard.smokeReadSources()
+                                                    let attached = dashboard.smokeWindow.attachedSheet != nil
+                                                    if let w = dashboard.smokeSheetWindow { _ = picture(w, "mail-question-sheet.png"); pictures.append("mail-question-sheet.png") }
+                                                    expect("with Imports, AI chats and Mail on and the Mail app running, \"Read Sources\" reads the local sources and puts one question as a sheet on the window — \"Local Sources Only\" first, \"Collect from Mail\" second; pressing the button again while it is up puts no second question; nothing has been asked of macOS or Mail yet", up.sheetUp && up.asks == 1 && up.collecting && attached && dashboard.smokeMail.asks == 1 && sheetText == "Also collect recent subjects and dates from Mail? [Local Sources Only | Collect from Mail]" && mock.counts.permission == 0 && mock.counts.run == 0 && dashboard.smokeHeld == full, [sheetText, "\(up)", "\(mock.counts)"])
+                                                    later(0.3) {
+                                                        dashboard.smokeAnswerMailSheet(collect: false)
+                                                        later(0.4) {
+                                                            dm = dashboard.smokeState()
+                                                            expect("\"Local Sources Only\" closes the sheet and leaves it at the local read: the status line says so, and nothing was asked of macOS or Mail", !dashboard.smokeMail.sheetUp && !dashboard.smokeMail.collecting && value(dm, "status").hasPrefix("Mail not included: you chose local sources only") && mock.counts.permission == 0 && mock.counts.run == 0 && dashboard.smokeHeld == full && importCount() == 1, dm + ["\(mock.counts)"])
+                                                            // yes, but macOS refuses
+                                                            mock.set(permission: -1743)
+                                                            afterRead(dashboard) {
+                                                                dashboard.smokeAnswerMailSheet(collect: true)
+                                                                later(0.6) {
+                                                                    dm = dashboard.smokeState()
+                                                                    expect("\"Collect from Mail\" when macOS refuses: \"Permission denied\" is shown as it is, the script is not run, nothing is saved, and the local read stands; macOS was asked off the main thread", value(dm, "status").hasPrefix("Permission denied — macOS did not allow Horizon to ask Mail") && mock.counts.permission == 1 && mock.counts.run == 0 && mock.counts.onMain == 0 && !dashboard.smokeMail.collecting && importCount() == 1 && dashboard.smokeHeld == full, dm + ["\(mock.counts)"])
+                                                                    // yes, allowed: two messages come back
+                                                                    mock.set(permission: 0, reply: MailMock.reply([("I", "<mock-1@mail.example>", now.addingTimeInterval(-2 * 86400), "Harborline delivery note"), ("S", "<mock-2@mail.example>", now.addingTimeInterval(-3 * 86400), "Atlas reply sent")]))
+                                                                    afterRead(dashboard) {
+                                                                        afterRead(dashboard) {
+                                                                            dm = dashboard.smokeState()
+                                                                            expect("\"Collect from Mail\" when allowed: the script is run once, off the main thread; the two subjects and dates are saved as a new import file, the sources are read again, and the records are in view; the status line reports what was read and saved", mock.counts.run == 1 && mock.counts.onMain == 0 && importCount() == 2 && dashboard.smokeHeld == "files:3 ai:5 mail:2 imports:4 | file:3 ai:6 mail:5" && value(dm, "status").hasPrefix("Read from Mail: Inbox 1 (of 1), Sent 1 (of 1) · Saved: 2 new · Sources read: ") && value(dm, "status").components(separatedBy: "Sources read: ").count == 2 && value(dm, "source.imports").contains("2 collected from Mail") && !dashboard.smokeMail.collecting, dm + ["\(mock.counts)", dashboard.smokeHeld])
+                                                                            _ = picture(dashboard.smokeWindow, "window-read-sources.png"); pictures.append("window-read-sources.png")
+                                                                            // yes, but the Mail switch is turned off while Mail is still being asked: nothing is kept
+                                                                            mock.set(reply: MailMock.reply([("I", "<mock-3@mail.example>", now.addingTimeInterval(-86400), "Harborline late arrival")]), delay: 0.7)
+                                                                            afterRead(dashboard) {
+                                                                                dashboard.smokeAnswerMailSheet(collect: true)
+                                                                                later(0.25) {
+                                                                                    dashboard.smokeToggle(.mail, false)
+                                                                                    later(1.1) {
+                                                                                        dm = dashboard.smokeState()
+                                                                                        expect("a switch turned off while Mail is still answering wins: what comes back is not saved and not shown, and the status line says it was not kept", mock.counts.run == 2 && importCount() == 2 && value(dm, "status").hasPrefix("Collected from Mail but not kept: Imports, AI chats and Mail are no longer all switched on") && !dashboard.smokeMail.collecting && dashboard.smokeHeld == "files:3 ai:5 mail:0 imports:0 | file:3 ai:5 mail:0", dm + ["\(mock.counts)", dashboard.smokeHeld])
+                                                                                        afterRead(dashboard) {
+                                                                                            // passive reads and reopening never come near Mail
+                                                                                            let cP = mock.counts, aP = dashboard.smokeMail.asks
+                                                                                            afterRead(dashboard) {
+                                                                                                simple.show(); dashboard.show()
+                                                                                                expect("a passive read (a switch, an import, the refresh tool, reopening a window) asks nothing of the Mail side and puts no question", mock.counts == cP && dashboard.smokeMail.asks == aP && dashboard.smokeHeld == "files:3 ai:5 mail:2 imports:4 | file:3 ai:6 mail:5", ["\(cP) → \(mock.counts)"])
+                                                                                                // 7c. a large snapshot is worked out off the main thread (forced here): nothing old stays on screen meanwhile
+                                                                                                dashboard.inlineLimit = 0
+                                                                                                simple.smokeType("Follow up on the Harborline quote")
+                                                                                                _ = dashboard.smokeSelect(key: "harborline")
+                                                                                                let was = simple.smokeState(), c0 = dashboard.smokeComputes
+                                                                                                afterApplied(dashboard) {
+                                                                                                    let done = dashboard.smokeComputes, sx = simple.smokeState()
+                                                                                                    dm = dashboard.smokeState()
+                                                                                                    expect("the earlier of the two computations is dropped as stale and the later one is shown: Mail off and the narrower period, with no mail line and no imported record", done.stale == c0.stale + 1 && done.asked == c0.asked + 2 && !done.working && dashboard.smokeTopicKeys == ["harborline"] && value(sx, "simple.loading") == "false" && value(sx, "simple.preview").hasPrefix("Task: Follow up on the Harborline quote\n") && !value(sx, "simple.preview").contains(" · Mail · ") && !value(sx, "simple.preview").contains("imported") && value(sx, "simple.preview").contains("Imports: skipped") && value(dm, "source.mail") == "Mail: Off — not used in the results", dm + sx + ["\(c0) → \(done)"])
+                                                                                                    dashboard.inlineLimit = 400
+                                                                                                    simple.smokeType(""); dashboard.smokeChoosePreset(0)
+                                                                                                    afterRead(dashboard) {
+                                                                                                        expect("back to everything on and three months for what follows", dashboard.smokeHeld == "files:3 ai:5 mail:2 imports:4 | file:3 ai:6 mail:5" && dashboard.smokeTopicKeys == ["harborline", "atlas"] && !dashboard.smokeComputes.working, [dashboard.smokeHeld, dashboard.smokeTopicKeys.joined(separator: ",")])
+                                                                                                        phase8()
+                                                                                                    }
+                                                                                                    dashboard.smokeToggle(.mail, true)
+                                                                                                }
+                                                                                                dashboard.smokeToggle(.mail, false)                                  // the sources narrow …
+                                                                                                let mid = dashboard.smokeState(), midSimple = simple.smokeState(), midKeys = dashboard.smokeTopicKeys, midSelected = dashboard.smokeSelectedKey
+                                                                                                dashboard.smokeApplyCustom(start: now.addingTimeInterval(-13 * 86400), end: now.addingTimeInterval(-7 * 86400))   // … and the period, before the first result is in
+                                                                                                expect("the moment a switch is turned off and the topics have to be worked out again off the main thread, nothing of the old result stays: no topic, no selection, no coverage line but \"Working out topics…\" or \"Off\", no preview and Copy off in the simple view, which shows it is working — where a moment before a preview with mail lines was on screen", value(was, "simple.preview").contains(" · Mail · ") && value(was, "simple.copyEnabled") == "true" && midKeys.isEmpty && midSelected == nil && value(mid, "topics") == "0" && value(mid, "copyEnabled") == "false" && value(mid, "source.files") == "Files: Working out topics…" && value(mid, "source.mail") == "Mail: Off — not used in the results" && value(mid, "spinner") == "true" && value(midSimple, "simple.preview").isEmpty && value(midSimple, "simple.copyEnabled") == "false" && value(midSimple, "simple.loading") == "true" && value(midSimple, "simple.spinner") == "true" && value(midSimple, "simple.suggestions").isEmpty && dashboard.smokeComputes.working && dashboard.smokeComputes.asked == c0.asked + 2, mid + midSimple)
+                                                                                            }
+                                                                                            dashboard.smokeReread()
+                                                                                        }
+                                                                                        dashboard.smokeToggle(.mail, true)
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                            dashboard.smokeReadSources()
+                                                                        }
+                                                                        dashboard.smokeAnswerMailSheet(collect: true)
+                                                                    }
+                                                                    dashboard.smokeReadSources()
+                                                                }
+                                                            }
+                                                            dashboard.smokeReadSources()
+                                                        }
+                                                    }
+                                                }
+                                                dashboard.smokeReadSources()
+                                            }
+                                            dashboard.smokeToggle(.mail, true)
+                                        }
+                                        dashboard.smokeReadSources()
+                                    }
+                                    dashboard.smokeReadSources(); dashboard.smokeReadSources(); dashboard.smokeReadSources()
                                 }
                             }
                         }
@@ -1295,7 +1491,37 @@ func runSampleCheck(_ path: String) -> Int32 {
             }
         }
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 60) { print("SMOKE FAIL  timed out"); try? fm.removeItem(at: temp); exit(1) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 120) { print("SMOKE FAIL  timed out"); try? fm.removeItem(at: temp); exit(1) }
+    // 0. while the (slowed) first read runs: the windows are already there, say they are reading, take typing, and reopen without a second read
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+        dashboard.onBackgroundRead = nil
+        var s0 = simple.smokeState()
+        expect("while the sources are still being read the simple view is already on screen and says so — a spinner and \"Reading your sources…\" — which is not the empty screen: no example is offered, and nothing is claimed to be missing", simple.smokeWindow.isVisible && value(s0, "simple.loading") == "true" && value(s0, "simple.spinner") == "true" && value(s0, "simple.hint") == "Reading your sources…" && value(s0, "simple.empty").hasPrefix("Still reading.") && value(s0, "simple.exampleOffer") == "hidden" && value(s0, "simple.suggestions").isEmpty && dashboard.smokeReads == (1, 0, true), s0)
+        simple.smokeType("Follow up on the Harborline quote")          // typing while it reads
+        simple.show(); simple.show()                                   // reopened (Finder, the menu-bar icon) …
+        dashboard.show()                                               // … and Sources & Settings opened, all during the read
+        s0 = simple.smokeState()
+        let d0 = dashboard.smokeState()
+        expect("typing works while it reads, and reopening the simple view and opening Sources & Settings put both on screen at once without starting a second read; the dashboard shows a spinner, \"Reading sources…\" and \"Reading…\" for each source that is on", value(s0, "simple.query") == "Follow up on the Harborline quote" && value(s0, "simple.loading") == "true" && simple.smokeWindow.isVisible && dashboard.smokeWindow.isVisible && dashboard.smokeReads == (1, 0, true) && value(d0, "spinner") == "true" && value(d0, "status") == "Reading sources…" && value(d0, "source.files") == "Files: Reading…" && value(d0, "source.imports") == "Imports: Reading…" && value(d0, "topics") == "0", s0 + d0)
+        _ = picture(simple.smokeWindow, "loading-simple.png"); _ = picture(dashboard.smokeWindow, "loading-dashboard.png")
+        // the menu-bar glyph as the app makes it (a template image), drawn large on a light and a dark bar
+        let glyph = ThreadGlyph.menuImage()
+        let sheet = NSImage(size: NSSize(width: 360, height: 100), flipped: false) { _ in
+            NSColor(white: 0.93, alpha: 1).setFill(); NSRect(x: 0, y: 0, width: 180, height: 100).fill(); NSColor(white: 0.16, alpha: 1).setFill(); NSRect(x: 180, y: 0, width: 180, height: 100).fill()
+            for (x, dark) in [(CGFloat(18), false), (CGFloat(198), true)] {
+                let big = NSRect(x: x, y: 14, width: 72, height: 72), small = NSRect(x: x + 100, y: 41, width: 18, height: 18)
+                for r in [big, small] {
+                    // as the menu bar does with a template image: its shape, in the bar's own colour
+                    let tinted = NSImage(size: r.size, flipped: false) { inner in glyph.draw(in: inner); (dark ? NSColor.white : NSColor.black).set(); inner.fill(using: .sourceIn); return true }
+                    tinted.draw(in: r)
+                }
+            }
+            return true
+        }
+        let glyphSaved = sheet.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }.map { (try? $0.write(to: folder.appendingPathComponent("menu-glyph-in-app.png"))) != nil } ?? false
+        expect("the menu-bar glyph the app makes is an 18-point template image (the continued-thread mark)", glyph.isTemplate && glyph.size == NSSize(width: 18, height: 18) && glyphSaved)
+        simple.smokeType(""); dashboard.smokeWindow.orderOut(nil); simple.show()      // as at an ordinary launch, for the walk that follows
+    }
     simple.show()
     app.run()
     exit(1)

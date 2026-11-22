@@ -3,7 +3,9 @@
 // handoff shown inline → one Copy button, which is the only place the clipboard is written. A click on the menu-bar
 // icon, or opening the app, shows that screen; a right-click shows a small menu with Quit.
 // This file holds the app delegate and the dashboard ("Sources & Settings"): the period, the source switches, coverage, the
-// evidence tables, imports, the Mail button and the refresh tool — everything opt-in, reached from one link.
+// evidence tables, "Read Sources" (which can include Mail, after a yes on its sheet), imports and the refresh tool —
+// everything opt-in, reached from one link. Reading, computing topics and asking Mail all happen off the main thread:
+// both windows open at once and show that they are still reading.
 // There is no always-on model, no key or file watcher, nothing injected or sent, and no network code.
 
 import AppKit
@@ -21,10 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            let image = NSImage(systemSymbolName: "calendar.badge.clock", accessibilityDescription: "Contexta Horizon")
-            image?.isTemplate = true
-            button.image = image
-            button.title = image == nil ? "Horizon" : ""
+            button.image = ThreadGlyph.menuImage()                      // the continued-thread mark, as a template image (Glyph.swift)
+            button.title = ""
             button.toolTip = "Contexta Horizon — What do you want to continue? (Right-click for the menu)"
             button.setAccessibilityLabel("Contexta Horizon, work context")
             button.target = self
@@ -73,6 +73,21 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
     private var readingFor: Set<SourceKind>?            // the switches the read under way was asked for
     private var staleReads = 0                          // answers that arrived after a later request and were dropped
     private var afterRead: String?                      // an import's or collection's result, kept in the status line after the read that follows
+    private var computes = 0                            // the number of the latest topic computation asked for
+    private var computing = false                       // a computation is running off the main thread
+    private var staleComputes = 0
+    private var collecting = false                      // the Mail question is on screen, or a collection is under way
+    private var mailSheet: NSAlert?
+    private var mailAsks = 0                            // how often the Mail question was put (for the tests)
+    /// Topics for more records than this are worked out off the main thread (with progress shown); fewer are instant.
+    /// Kept low: working them out on the main thread is only for snapshots small enough not to be felt.
+    var inlineLimit = 400
+    private var joinedPresses = 0                       // presses of "Read Sources" that joined a read already under way
+    /// The Mac's side of a Mail collection. The app uses the live one; the tests put a mock here.
+    var mailSide = MailAdapter.Side.live
+    /// For the tests only: run on the background queue just before a read (to make one slow), and after topics were applied.
+    var onBackgroundRead: (() -> Void)?
+    var onApplied: (() -> Void)?
     /// Called after each read (used by the synthetic window smoke test).
     var onRead: (() -> Void)?
     /// Called whenever the topics, the period or the coverage changed (the simple screen follows).
@@ -83,20 +98,25 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
 
     // What the simple screen shows is exactly what this dashboard computed (same period, same switches).
     var isLoaded: Bool { snapshot != nil }
+    /// Reading or computing right now (both windows show progress while this is true).
+    var isWorking: Bool { busy || computing }
+    var isComputing: Bool { computing }
     var currentTopics: [TopicSummary] { topics }
     var currentWindow: HorizonWindow { horizon }
     var currentCoverage: [SourceCoverage] { coverages }
-    func ensureLoaded() { if snapshot == nil { reread(nil) } }
+    /// Starts the first read if there is none yet — and none under way: reopening a window while it is still reading
+    /// does not start another.
+    func ensureLoaded() { if snapshot == nil && !busy { reread(nil) } }
 
     private let months = NSSegmentedControl(labels: ["3 months", "6 months", "Custom"], trackingMode: .selectOne, target: nil, action: nil)
     private let startPicker = NSDatePicker(), endPicker = NSDatePicker()
     private let applyButton = NSButton(title: "Apply", target: nil, action: nil)
     private let customFeedback = HorizonController.label("", size: 12, soft: true)
     private let customRow = NSStackView()
-    private let rereadButton = NSButton(title: "Reread Sources", target: nil, action: nil)
+    private let readButton = NSButton(title: "Read Sources", target: nil, action: nil)
     private let importButton = NSButton(title: "Import…", target: nil, action: nil)
     private let toolButton = NSButton(title: "Refresh Feeds…", target: nil, action: nil)
-    private let mailButton = NSButton(title: "Collect from Mail…", target: nil, action: nil)
+    private let spinner = NSProgressIndicator()
     private let copyButton = NSButton(title: "Open in Simple View", target: nil, action: nil)
     private let backButton = NSButton(title: "‹ Simple View", target: nil, action: nil)
     private let quitButton = NSButton(title: "Quit", target: nil, action: nil)
@@ -152,16 +172,18 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         customRow.isHidden = !preferences.usesCustom
         fillPickers()
         months.setAccessibilityLabel("Period")
-        for (b, sel) in [(rereadButton, #selector(reread(_:))), (importButton, #selector(importExport)), (mailButton, #selector(collectFromMail)), (toolButton, #selector(runTool)), (copyButton, #selector(useInSimple)), (backButton, #selector(goBack))] { b.target = self; b.action = sel; b.bezelStyle = .rounded }
+        for (b, sel) in [(readButton, #selector(readSources(_:))), (importButton, #selector(importExport)), (toolButton, #selector(runTool)), (copyButton, #selector(useInSimple)), (backButton, #selector(goBack))] { b.target = self; b.action = sel; b.bezelStyle = .rounded }
+        readButton.keyEquivalent = "\r"                                 // the primary action of this window
+        spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
+        spinner.setAccessibilityLabel("Reading sources")
         quitButton.target = NSApp; quitButton.action = #selector(NSApplication.terminate(_:)); quitButton.bezelStyle = .rounded
         backButton.toolTip = "Back to the “What do you want to continue?” screen"
-        mailButton.toolTip = "Asks the Mail app, if it is already running, for the subjects and dates of recent Inbox and Sent messages (no bodies or addresses; Mail is never opened for you)"
-        rereadButton.toolTip = "Reads the preindex, ai.jsonl, mail.jsonl, your imports and manifest.json again now"
+        readButton.toolTip = "Reads again, now, the local sources that are switched on. If Imports, AI chats and Mail are all on and the Mail app is already running, it then asks whether to also collect recent subjects and dates from Mail (no bodies or addresses; Mail is never opened for you)"
         importButton.toolTip = "Imports an export file from this Mac: a ChatGPT or Claude conversations.json, an Apple Mail or Gmail Takeout .mbox, or a normalized .jsonl (saved as a new file; records already imported are skipped)"
         copyButton.toolTip = "Opens the selected topic in the simple view. Copying happens only there, with its Copy button."
         copyButton.isEnabled = false
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let top = NSStackView(views: [backButton, title, months, spacer, rereadButton, importButton, mailButton, toolButton])
+        let top = NSStackView(views: [backButton, title, months, spacer, spinner, readButton, importButton, toolButton])
         top.orientation = .horizontal; top.spacing = 10; top.alignment = .centerY
 
         let sources = NSStackView(); sources.orientation = .vertical; sources.alignment = .leading; sources.spacing = 4
@@ -226,7 +248,7 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         if !placedDivider { placedDivider = true; window.layoutIfNeeded(); split.setPosition(520, ofDividerAt: 0) }   // room for all five topic columns
-        if snapshot == nil { reread(nil) }
+        ensureLoaded()
     }
 
     // MARK: actions (each one starts from a click)
@@ -288,14 +310,19 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
     @objc func reread(_ sender: Any?) {
         reads += 1
         let request = reads, places = self.places, enabled = preferences.enabled
-        busy = true; readingFor = enabled; statusLabel.stringValue = "Rereading sources…"
+        busy = true; readingFor = enabled; statusLabel.stringValue = "Reading sources…"
+        if snapshot == nil { for k in SourceKind.allCases { sourceLabels[k]?.stringValue = preferences.isOn(k) ? "Reading…" : "Off — not used in the results" } }
+        progress()
+        onChange?()                                                    // the simple view shows that reading is going on
+        let before = onBackgroundRead
         DispatchQueue.global(qos: .userInitiated).async {
+            before?()
             let snap = Snapshot.read(places, enabled: enabled)
             DispatchQueue.main.async {
                 guard request == self.reads else { self.staleReads += 1; return }
-                self.busy = false; self.readingFor = nil
+                self.busy = false; self.readingFor = nil; self.progress()
                 self.snapshot = snap.restricted(to: self.preferences.enabled)
-                self.statusLabel.stringValue = (self.afterRead.map { $0 + " · " } ?? "") + "Sources reread: " + Dates.minute(snap.readAt) + (snap.manifest.problem.map { " · manifest: " + $0 } ?? "")
+                self.statusLabel.stringValue = (self.afterRead.map { $0 + " · " } ?? "") + "Sources read: " + Dates.minute(snap.readAt) + (snap.manifest.problem.map { " · manifest: " + $0 } ?? "")
                 self.afterRead = nil
                 self.recompute()
                 self.updateTool()
@@ -321,6 +348,14 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
     /// Clicks a source switch as a person would; presses "Reread Sources"; and what the reads came to.
     func smokeToggle(_ kind: SourceKind, _ on: Bool) { if let c = sourceChecks[kind] { c.state = on ? .on : .off; sourceToggled(c) } }
     func smokeReread() { reread(nil) }
+    /// Presses "Read Sources" as a click would; answers the Mail sheet as a click on one of its buttons would; and what the Mail side came to.
+    func smokeReadSources() { readSources(nil) }
+    func smokeAnswerMailSheet(collect: Bool) { if let sheet = mailSheet { window.endSheet(sheet.window, returnCode: collect ? .alertSecondButtonReturn : .alertFirstButtonReturn) } }
+    var smokeMail: (asks: Int, sheetUp: Bool, collecting: Bool) { (mailAsks, mailSheet != nil, collecting) }
+    var smokeSheetWindow: NSWindow? { mailSheet?.window }
+    var smokeSheetText: String { mailSheet.map { $0.messageText + " [" + $0.buttons.map { $0.title }.joined(separator: " | ") + "]" } ?? "" }
+    var smokeComputes: (asked: Int, stale: Int, working: Bool) { (computes, staleComputes, computing) }
+    var smokeJoinedPresses: Int { joinedPresses }
     var smokeReads: (asked: Int, stale: Int, busy: Bool) { (reads, staleReads, busy) }
     /// What is held in memory right now, by where it came from and by record type (nothing excluded may be here).
     var smokeHeld: String { guard let s = snapshot else { return "none" }; return SourceKind.allCases.map { k in "\(k.rawValue):\(s.evidence.filter { $0.origin == k }.count)" }.joined(separator: " ") + " | " + RecordType.allCases.map { t in "\(t.rawValue):\(s.evidence.filter { $0.type == t }.count)" }.joined(separator: " ") }
@@ -339,7 +374,7 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         var out = ["title=" + window.title, "period=" + (months.label(forSegment: months.selectedSegment) ?? "") + " [" + (0..<months.segmentCount).map { months.label(forSegment: $0) ?? "" }.joined(separator: ",") + "]",
                    "customRow=" + (customRow.isHidden ? "hidden" : "shown") + " feedback=" + customFeedback.stringValue,
                    "window=" + windowLabel.stringValue, "topics=\(topicTable.numberOfRows)", "evidence=\(evidenceTable.numberOfRows)", "copyEnabled=\(copyButton.isEnabled)",
-                   "buttons=" + [rereadButton, importButton, mailButton, toolButton, copyButton].map { $0.title }.joined(separator: ","), "preview=" + (selected.map { Export.simple(task: "", topic: $0, window: horizon, coverage: coverages) } ?? ""), "tool=" + toolLabel.stringValue, "header=" + evidenceHeader.stringValue]
+                   "buttons=" + [readButton, importButton, toolButton, copyButton].map { $0.title }.joined(separator: ","), "status=" + statusLabel.stringValue, "spinner=\(isWorking || (collecting && mailSheet == nil))", "preview=" + (selected.map { Export.simple(task: "", topic: $0, window: horizon, coverage: coverages) } ?? ""), "tool=" + toolLabel.stringValue, "header=" + evidenceHeader.stringValue]
         for k in SourceKind.allCases { out.append("source." + k.rawValue + "=" + (sourceChecks[k]?.title ?? "") + ": " + (sourceLabels[k]?.stringValue ?? "")) }
         return out
     }
@@ -375,32 +410,71 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         return "\(what): \(r.imported) new" + (r.duplicates > 0 ? " · \(r.duplicates) already there, skipped" : "") + (r.skipped > 0 ? " · \(r.skipped) could not be read" : "")
     }
 
-    /// The optional local Mac Mail adapter: only from this button, only after this confirmation, only if Mail is
-    /// already running. macOS shows its own permission prompt the first time; a refusal is shown as it is.
-    @objc private func collectFromMail() {
-        let confirm = NSAlert()
-        confirm.messageText = "Collect subjects and dates of recent mail from the Mail app?"
-        confirm.informativeText = "From Inbox and Sent, the newest \(MailAdapter.cap) messages each: subjects and dates only. No bodies, addresses or account details are read. If Mail is not running, it is not opened and nothing happens. The first time, macOS asks whether to allow this. The result is saved as a new import file; existing data is not changed."
-        confirm.addButton(withTitle: "Cancel"); confirm.addButton(withTitle: "Collect")
-        guard confirm.runModal() == .alertSecondButtonReturn else { statusLabel.stringValue = "Nothing was collected from Mail."; return }
-        guard MailAdapter.liveIsRunning() else { statusLabel.stringValue = MailAdapter.Outcome.notRunning.message; return }
-        mailButton.isEnabled = false; statusLabel.stringValue = "Asking Mail…"
-        let places = self.places
+    /// "Read Sources", the window's primary button — the one explicit request to read. It reads again the local sources
+    /// the switches allow, at once. Mail can be part of it only when Imports, AI chats and Mail are all on and the
+    /// Mail app is already running: then a sheet asks, and only a yes there goes on to Mail. In every other case the
+    /// local read stands on its own and the status line says why Mail was not part of it. Opening or reopening a
+    /// window, a switch, an import and the refresh tool read too, but never come here: they can never reach Mail.
+    @objc private func readSources(_ sender: Any?) {
+        // A press while a read for these switches is already under way joins that read: it does not start another.
+        if busy, let underway = readingFor, preferences.enabled.isSubset(of: underway) { joinedPresses += 1 } else { reread(nil) }
+        switch MailAdapter.step(enabled: preferences.enabled, underway: collecting, isRunning: mailSide.isRunning) {
+        case .skip(let why): afterRead = "Mail not included: " + why
+        case .ask: askAboutMail()
+        }
+    }
+
+    /// The question, as a sheet on this window (it stops nothing else: the read goes on and the simple view stays usable).
+    private func askAboutMail() {
+        collecting = true; mailAsks += 1
+        let sheet = NSAlert()
+        sheet.messageText = "Also collect recent subjects and dates from Mail?"
+        sheet.informativeText = "Your local sources are being read now. The Mail app is running, so Horizon can also ask it for the subjects and dates of the newest \(MailAdapter.cap) messages in Inbox and in Sent. No bodies, addresses or account details are read, and nothing is sent. The first time, macOS asks whether to allow this. What is collected is saved on this Mac as a new import file."
+        sheet.addButton(withTitle: "Local Sources Only")              // the default: Return leaves Mail alone
+        sheet.addButton(withTitle: "Collect from Mail")
+        mailSheet = sheet
+        sheet.beginSheetModal(for: window) { [weak self] answer in
+            self?.mailSheet = nil
+            self?.mailAnswered(collect: answer == .alertSecondButtonReturn)
+        }
+    }
+
+    /// After the sheet. A yes asks Mail — entirely off the main thread (is it still running, does macOS allow it, the
+    /// fixed script in the helper process). What comes back is saved only if the switches still allow it at that moment.
+    private func mailAnswered(collect: Bool) {
+        guard collect else { collecting = false; say("Mail not included: you chose local sources only"); return }
+        statusLabel.stringValue = "Asking Mail…"; progress()
+        let side = mailSide, places = self.places
         DispatchQueue.global(qos: .userInitiated).async {
-            let allowed = MailAdapter.livePermission()                              // macOS may show its prompt here
+            let got = MailAdapter.collect(isRunning: side.isRunning, permission: side.permission, run: side.run)
             DispatchQueue.main.async {
-                let got = MailAdapter.collect(isRunning: MailAdapter.liveIsRunning, permission: { allowed }, run: MailAdapter.liveRun)
+                guard MailAdapter.mayKeep(self.preferences.enabled) else {
+                    self.collecting = false; self.say(got.rows.isEmpty ? got.outcome.message : "Collected from Mail but not kept: Imports, AI chats and Mail are no longer all switched on"); return
+                }
+                guard !got.rows.isEmpty else { self.collecting = false; self.say(got.outcome.message); return }
                 DispatchQueue.global(qos: .userInitiated).async {
                     var parsed = Importer.Parsed(); parsed.rows = got.rows; parsed.format = "macmail"
-                    let result = got.rows.isEmpty ? nil : Importer.save(parsed, name: "mac-mail", places: places)
+                    let result = Importer.save(parsed, name: "mac-mail", places: places)
                     DispatchQueue.main.async {
-                        self.mailButton.isEnabled = true
-                        self.statusLabel.stringValue = got.outcome.message + (result.map { " · " + HorizonController.describe($0, what: "Saved") } ?? "")
-                        if result?.file != nil { self.keepForStatus(self.statusLabel.stringValue); self.reread(nil) }
+                        self.collecting = false
+                        let message = got.outcome.message + " · " + HorizonController.describe(result, what: "Saved")
+                        if result.file != nil { self.keepForStatus(message); self.reread(nil) } else { self.say(message) }
                     }
                 }
             }
         }
+    }
+
+    /// A word in the status line now, kept in front of "Sources read: …" if a read is still to finish.
+    private func say(_ message: String) {
+        if busy { afterRead = message }
+        statusLabel.stringValue = busy ? message + " · Reading sources…" : message + (snapshot.map { " · Sources read: " + Dates.minute($0.readAt) } ?? "")
+        progress()
+    }
+
+    /// The spinner in this window, and the simple view's, follow what is going on.
+    private func progress() {
+        if isWorking || (collecting && mailSheet == nil) { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
     }
 
     @objc private func runTool() {
@@ -434,21 +508,55 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         toolLabel.stringValue = "Refresh tool: " + check.reason
     }
 
+    /// What the windows show for a snapshot, a period and the switches. A pure computation: it runs on any thread.
+    private struct Computed { let window: HorizonWindow; let note: String?; let coverage: [SourceCoverage]; let topics: [TopicSummary] }
+    private static func compute(_ snap: Snapshot, _ resolved: (window: HorizonWindow, note: String?), _ enabled: Set<SourceKind>) -> Computed {
+        Computed(window: resolved.window, note: resolved.note, coverage: SourceKind.allCases.map { snap.coverage(for: $0, window: resolved.window, enabled: enabled) },
+                 topics: Analysis.topics(snap.evidence, window: resolved.window, enabled: enabled))
+    }
+
+    /// Works out the topics again after a read, a switch or a change of period. A small snapshot is done on the spot.
+    /// A large one is worked out off the main thread while the windows stay usable and show progress; each request has
+    /// a number, and a result that arrives after a later request (the period or a switch changed meanwhile) is dropped.
     private func recompute() {
         guard let snap = snapshot else { return }
-        let keep = selected?.key
-        let resolved = preferences.window(now: Date())
+        computes += 1
+        let request = computes, resolved = preferences.window(now: Date()), enabled = preferences.enabled
+        if snap.evidence.count <= inlineLimit { computing = false; apply(HorizonController.compute(snap, resolved, enabled)); return }
+        // Until the new result is in, nothing of the old one stays on screen: after a switch was turned off or the
+        // period narrowed, the old topics, coverage and copy text could show what is no longer allowed.
+        computing = true
         horizon = resolved.window
         windowLabel.stringValue = "Period: " + horizon.label + (resolved.note.map { " — " + $0 } ?? "")
-        if !horizon.isCustom && months.selectedSegment == 2 && resolved.note != nil { months.selectedSegment = preferences.months == 6 ? 1 : 0 }
-        let enabled = preferences.enabled
-        coverages = SourceKind.allCases.map { snap.coverage(for: $0, window: horizon, enabled: enabled) }
+        topics = []; coverages = []; selected = nil
+        for k in SourceKind.allCases { sourceLabels[k]?.stringValue = enabled.contains(k) ? "Working out topics…" : "Off — not used in the results" }
+        topicTable.reloadData(); topicTable.deselectAll(nil)
+        showSelection()
+        progress(); onChange?()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let done = HorizonController.compute(snap, resolved, enabled)
+            DispatchQueue.main.async {
+                guard request == self.computes else { self.staleComputes += 1; return }
+                self.computing = false
+                self.apply(done)
+            }
+        }
+    }
+
+    private func apply(_ c: Computed) {
+        let keep = selected?.key
+        horizon = c.window
+        windowLabel.stringValue = "Period: " + horizon.label + (c.note.map { " — " + $0 } ?? "")
+        if !horizon.isCustom && months.selectedSegment == 2 && c.note != nil { months.selectedSegment = preferences.months == 6 ? 1 : 0 }
+        coverages = c.coverage
         for c in coverages { sourceLabels[c.kind]?.stringValue = c.summary }
-        topics = Analysis.topics(snap.evidence, window: horizon, enabled: enabled)
+        topics = c.topics
         topicTable.reloadData()
         if let k = keep, let i = topics.firstIndex(where: { $0.key == k }) { topicTable.selectRowIndexes([i], byExtendingSelection: false); selected = topics[i] } else { selected = nil; topicTable.deselectAll(nil) }
         showSelection()
+        progress()
         onChange?()
+        onApplied?()
     }
 
     private func showSelection() {

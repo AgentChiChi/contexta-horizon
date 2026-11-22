@@ -47,6 +47,8 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private let exampleBanner = NSStackView()
     private let exampleExit = NSButton(title: "Exit example", target: nil, action: nil)
     private var example: FictionalExample?
+    private let spinner = NSProgressIndicator()                          // turns while the sources are being read or topics worked out
+    private var loading = false
 
     private var candidates: [TopicSummary] = []
     private var pickedKey: String?
@@ -125,14 +127,17 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let bottom = NSStackView(views: [copyButton, status, spacer, advanced]); bottom.orientation = .horizontal; bottom.spacing = 10; bottom.alignment = .centerY
 
-        let stack = NSStackView(views: [title, field, hint, suggestionRow, exampleBanner, box, caption, bottom])
+        spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
+        spinner.setAccessibilityLabel("Reading sources")
+        let hintRow = NSStackView(views: [spinner, hint]); hintRow.orientation = .horizontal; hintRow.spacing = 6; hintRow.alignment = .centerY
+        let stack = NSStackView(views: [title, field, hintRow, suggestionRow, exampleBanner, box, caption, bottom])
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         stack.setCustomSpacing(14, after: title); stack.setCustomSpacing(6, after: field); stack.setCustomSpacing(12, after: suggestionRow); stack.setCustomSpacing(6, after: box); stack.setCustomSpacing(14, after: caption)
         stack.edgeInsets = NSEdgeInsets(top: 24, left: 26, bottom: 20, right: 26)
         stack.translatesAutoresizingMaskIntoConstraints = false
         let content = NSView(); content.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: content.leadingAnchor), stack.trailingAnchor.constraint(equalTo: content.trailingAnchor), stack.topAnchor.constraint(equalTo: content.topAnchor), stack.bottomAnchor.constraint(equalTo: content.bottomAnchor)])
-        for v in [field, box, bottom, hint, caption, exampleBanner] as [NSView] { v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -52).isActive = true }
+        for v in [field, box, bottom, hintRow, caption, exampleBanner] as [NSView] { v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -52).isActive = true }
         box.setContentHuggingPriority(.defaultLow, for: .vertical)
         window.contentView = content
         refresh()
@@ -158,9 +163,12 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         let query = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         var chosen: TopicSummary?
         candidates = []
-        if example == nil, !dashboard.isLoaded {
+        // Still reading (or still working out topics with none to show yet) is not the same as empty: say so, and keep the field usable.
+        loading = example == nil && (!dashboard.isLoaded || (dashboard.isComputing && topics.isEmpty))
+        if dashboard.isWorking && example == nil { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+        if loading {
             hint.stringValue = "Reading your sources…"
-            emptyNote.stringValue = ""
+            emptyNote.stringValue = "Still reading.\nYou can type your task now; topics appear as soon as the sources are read."
         } else if topics.isEmpty {
             hint.stringValue = "No topics were found in this period with the sources that are on."
             emptyNote.stringValue = "There are no topics to show yet.\nOpen Sources & Settings to check the period and sources, or to import data."
@@ -202,7 +210,7 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         caption.stringValue = example != nil ? "Fictional example · not your records · nothing is read, saved or copied" : (!dashboard.isLoaded ? "" : "Period: " + dashboard.currentWindow.dayLabel + (note.map { " · Source caution: " + $0 } ?? "") + " · Titles and dates only")
         // The offer exists only on the empty screen with nothing typed (records were read and there is no topic at all) —
         // never while a task is typed, and never for a task that merely finds no match.
-        exampleOffer.isHidden = !(example == nil && dashboard.isLoaded && dashboard.currentTopics.isEmpty && query.isEmpty)
+        exampleOffer.isHidden = !(example == nil && !loading && dashboard.isLoaded && dashboard.currentTopics.isEmpty && query.isEmpty)
         exampleBanner.isHidden = example == nil
         window.title = example == nil ? "Contexta Horizon" : "Contexta Horizon — fictional example"
     }
@@ -229,7 +237,7 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
 
     /// Enters the fictional example: made in memory now, with its one topic chosen so the result is seen at once.
     @objc private func tryExample() {
-        guard example == nil, dashboard.isLoaded, dashboard.currentTopics.isEmpty, field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard example == nil, !loading, dashboard.isLoaded, dashboard.currentTopics.isEmpty, field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         example = FictionalExample.make()
         pickedKey = FictionalExample.key; field.stringValue = ""
         refresh()
@@ -274,7 +282,7 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
          "simple.copyEnabled=\(copyButton.isEnabled)", "simple.copyCount=\(copyCount)", "simple.status=" + status.stringValue, "simple.caption=" + caption.stringValue,
          "simple.empty=" + (emptyNote.isHidden ? "" : emptyNote.stringValue.replacingOccurrences(of: "\n", with: " ")),
          "simple.exampleOffer=" + (exampleOffer.isHidden ? "hidden" : exampleOffer.title), "simple.exampleBanner=" + (exampleBanner.isHidden ? "hidden" : (exampleBanner.arrangedSubviews.first as? NSTextField)?.stringValue ?? "") + (exampleBanner.isHidden ? "" : " [" + exampleExit.title + "]"),
-         "simple.example=\(example != nil)", "simple.preview=" + preview.string]
+         "simple.example=\(example != nil)", "simple.loading=\(loading)", "simple.spinner=\(dashboard.isWorking && example == nil)", "simple.preview=" + preview.string]
     }
 }
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds dist/contexta-horizon.app on this Mac, writes the example mailbox (dist/Examples), runs the static checks, the
+# Builds dist/contexta-horizon.app on this Mac (with its icon, drawn from source), writes the example mailbox (dist/Examples), runs the static checks, the
 # synthetic self-test and the check of the example. Nothing is downloaded, installed, published or copied anywhere else.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -8,8 +8,11 @@ APP="dist/contexta-horizon.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 swiftc -O -swift-version 5 -parse-as-library -target "$(uname -m)-apple-macos13.0" -framework AppKit \
-  -o "$APP/Contents/MacOS/ContextaHorizon" Sources/Core.swift Sources/MailAdapter.swift Sources/Simple.swift Sources/App.swift Sources/SelfTest.swift
+  -o "$APP/Contents/MacOS/ContextaHorizon" Sources/Core.swift Sources/MailAdapter.swift Sources/Glyph.swift Sources/Simple.swift Sources/App.swift Sources/SelfTest.swift
 cp Info.plist "$APP/Contents/Info.plist"
+# The icon is drawn from its source on every build (Sources/Glyph.swift + Icon/make-icon.swift; the same files each time).
+bash Icon/make-icon.sh
+mkdir -p "$APP/Contents/Resources" && cp Icon/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 codesign --force --sign - "$APP" >/dev/null
 echo "Built: $(pwd)/$APP"
 echo

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Contexta Horizon, Finder icon: the 112 by 112 tile (corner radius 25, the mark as an 87 by 72 SVG centred in it) inside the macOS icon margins. Written by Icon/make-icon.swift from Sources/Glyph.swift. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <g transform="translate(100 100) scale(7.357142857)">
+    <rect width="112" height="112" rx="25" fill="#172a32"/>
+    <svg x="12.5" y="20" width="87" height="72" viewBox="0 0 112 80" preserveAspectRatio="xMidYMid meet">
+      <path d="M6 40H32 M69 20A23 23 0 1 0 69 60 M80 40H106" fill="none" stroke="#79e2bd" stroke-width="9" stroke-linecap="round"/>
+    </svg>
+  </g>
+</svg>

@@ -1,20 +1,22 @@
 # Getting started with Contexta Horizon
 
-**Public preview v0.5.2 (build 8)** · Apple Silicon · macOS 13 or later
+**Public preview v0.5.3 (build 10)** · Apple Silicon · macOS 13 or later
 
 Contexta Horizon helps you pick up earlier work by finding a short list of dated references on your Mac. It shows titles and where they came from, not an AI-generated answer. Start with the built-in fictional example. Then, if you want to try your own work, choose what to import and review exactly what you'd share.
 
 ## Install or upgrade
 
-1. Open the [v0.5.2 release](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.2) in `AgentChiChi/contexta-horizon`. Download [Contexta-Horizon-0.5.2-macOS-arm64.zip](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/Contexta-Horizon-0.5.2-macOS-arm64.zip) and [SHA256SUMS.txt](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/SHA256SUMS.txt). The prebuilt app does not run on Intel Macs. From the download folder, run `shasum -a 256 Contexta-Horizon-0.5.2-macOS-arm64.zip` and compare the output with the corresponding line in `SHA256SUMS.txt`. Use the same check for the sample mailbox or skill ZIP if you download them. If a hash differs, don't open the file.
-2. Unzip the archive in Finder and move `contexta-horizon.app` to **Applications**. If you want the optional Aside skill, use **Applications** inside your home folder (`~/Applications`), creating the folder if needed. The helper does not look in `/Applications`. Open the app; its calendar icon appears in the menu bar.
-3. **Upgrading?** Right-click the calendar icon, choose **Quit Contexta Horizon**, and replace the old app bundle before opening the new one. Keep only one installed copy. Replacing the app does not remove imports stored separately under `~/WorkIndex`.
+1. Open the [v0.5.3 release](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.3) in `AgentChiChi/contexta-horizon`. Download [Contexta-Horizon-0.5.3-macOS-arm64.zip](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/Contexta-Horizon-0.5.3-macOS-arm64.zip) and [SHA256SUMS.txt](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/SHA256SUMS.txt). The prebuilt app does not run on Intel Macs. From the download folder, run `shasum -a 256 Contexta-Horizon-0.5.3-macOS-arm64.zip` and compare the output with the corresponding line in `SHA256SUMS.txt`. Use the same check for the sample mailbox or skill ZIP if you download them. If a hash differs, don't open the file.
+2. Unzip the archive in Finder and move `contexta-horizon.app` to **Applications**. If you want the optional Aside skill, use **Applications** inside your home folder (`~/Applications`), creating the folder if needed. The helper does not look in `/Applications`. Open the app and look for the `-C-` icon in the menu bar. The Finder icon uses the same mark in mint on a dark background.
+3. **Upgrading?** Right-click the old menu-bar icon, choose **Quit Contexta Horizon**, and replace the old app bundle before opening the new one. Keep only one installed copy. Replacing the app does not remove imports stored separately under `~/WorkIndex`.
 
 **macOS security:** The app is ad-hoc signed and **not Apple-notarized**. A matching checksum verifies the download against the release's checksum; it is not notarization. If macOS blocks the app, verify the source and leave the app unopened if your Mac's security policy does not allow it. Do not disable Gatekeeper or bypass the warning. If appropriate, review and build the source locally: with Apple's Command Line Tools installed, run `bash build.sh` from the extracted release source. It builds `dist/contexta-horizon.app`, generates the sample mailbox, and runs checks without installing the app.
 
-[Watch the 39-second walkthrough](https://github.com/AgentChiChi/contexta-horizon#contexta-horizon-for-mac) to see the built-in example and the separate copy-enabled mailbox preview.
+[Watch the 39-second v0.5.2 walkthrough](https://github.com/AgentChiChi/contexta-horizon#contexta-horizon-for-mac) to see the built-in example and the separate copy-enabled mailbox preview. It shows the older icon and controls.
 
 ## Start with the fictional example
+
+Simple View and **Sources & Settings** open while sources are still loading. You can type in Simple View while the spinner and **Reading your sources…** are shown. Reopening a window while a read is in progress does not start another read. **Still reading** is not an empty result.
 
 When Horizon has finished reading sources and there are no topics and nothing typed, click **Try a fictional example**. You'll see a made-up Harborline topic with dated file, chat, and mail titles in the same preview format as a real result. Opening the example doesn't read any source files or save or import anything. **Copy** is disabled. Click **Exit example** to return to the empty view. The example is not offered for a typed task with no match, and Aside lookup never returns it.
 
@@ -28,7 +30,7 @@ When Horizon has finished reading sources and there are no topics and nothing ty
 
 ## Optional: practice with a sample mailbox
 
-Unlike the built-in example, the [sample-mail.mbox](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/sample-mail.mbox) download is a real import of **fictional** data. It contains 11 made-up messages about Harborline, Atlas, and Northfield. In **Sources & Settings → Import…**, select the mailbox. Keep **Imports**, **AI chats**, and **Mail** on to see the imported records. Go back to **Simple View**, choose **Harborline** or type **Follow up on the Harborline quote**, and review and copy the preview as you would with your own records.
+Unlike the built-in example, the [sample-mail.mbox](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/sample-mail.mbox) download is a real import of **fictional** data. It contains 11 made-up messages about Harborline, Atlas, and Northfield. In **Sources & Settings → Import…**, select the mailbox. Keep **Imports**, **AI chats**, and **Mail** on to see the imported records. Go back to **Simple View**, choose **Harborline** or type **Follow up on the Harborline quote**, and review and copy the preview as you would with your own records.
 
 The default period is the last **3 calendar months**. If the sample is older, choose **6 months** or a **Custom** range of up to six months that covers its dates. You can also download and unzip **Source code (zip)** from the release, open Terminal in the extracted source folder, and make a fresh mailbox:
 
@@ -36,7 +38,7 @@ The default period is the last **3 calendar months**. If the sample is older, ch
 bash Examples/make-sample.sh "$HOME/Downloads/sample-mail-today.mbox"
 ```
 
-This writes 11 fictional messages dated 2 to 24 days before you run it. It does not read your personal records or send anything. Reimporting the same records skips duplicates; importing a newly dated copy can add records. To remove the downloaded sample, delete only its import file ending in `-sample-mail.jsonl` from `~/WorkIndex/horizon-v1/imports/`, then click **Reread Sources**. A sample imported under a different filename will have a different suffix.
+This writes 11 fictional messages dated 2 to 24 days before you run it. It does not read your personal records or send anything. Reimporting the same records skips duplicates; importing a newly dated copy can add records. To remove the downloaded sample, delete only its import file ending in `-sample-mail.jsonl` from `~/WorkIndex/horizon-v1/imports/`, then click **Read Sources** and choose **Local Sources Only** if asked. A sample imported under a different filename will have a different suffix.
 
 ## What a source switch does
 
@@ -47,22 +49,32 @@ The switches control what Horizon opens during a source read, not just what it d
 - With all four switches off, a normal source read opens no source file, not even the manifest, and Aside lookup returns unavailable.
 - Turning a switch off removes the excluded records from the active view without starting a new read. It doesn't cancel a read already under way: that read uses the switches captured at its start, and any excluded records are discarded before it updates the view. Turning a switch on makes newly allowed sources eligible for a read.
 
-**Manual actions are different.** You can still use **Import…** or **Collect from Mail…** while the switches are off. These actions can check existing import files for duplicates and save new snapshots; the results stay out of the view until all three import switches are on. **Collect from Mail…** is separate from importing a mailbox export: it asks for confirmation, accesses only an already-running Apple Mail app, and may trigger a macOS Automation permission prompt. It collects recent subjects and dates from Inbox and Sent, not bodies or addresses, and sends nothing. Switching a source off doesn't delete saved imports or revoke Automation permission.
+Switching a source off doesn't delete saved imports or revoke Automation permission.
+
+## Read Sources and optional Mail collection
+
+**Read Sources** in **Sources & Settings** replaces the old **Reread Sources** and **Collect from Mail…** buttons. It immediately reads the allowed local sources, including any eligible saved mail records. If a read for those sources is already in progress, pressing the button joins that read instead of starting another. Return in **Sources & Settings** activates **Read Sources**; it never copies the preview.
+
+- The app checks whether Apple Mail is running only if **Imports**, **AI chats**, and **Mail** are all on and no Mail collection is already in progress. **Files** is not required. Horizon never starts Mail. If Mail is already running, a sheet offers **Local Sources Only** (the default, including if you press Return on the sheet) or **Collect from Mail**. Only explicitly choosing **Collect from Mail** accesses the running app. Opening or reopening a window, changing switches, importing, refreshing feeds, or running an Aside lookup never offers or starts Mail collection.
+- With your approval and macOS Automation permission, Horizon collects subjects and dates from up to the 200 newest messages in each of Inbox and Sent. It reads no message bodies, addresses, or account details and sends nothing. Before saving the result as a local import, Horizon checks the three switches again. If any is off, it discards the result. If collection is skipped or fails, the local read still stands; check the status line for the reason.
+- **Import…** and **Refresh Feeds…** are separate actions. **Import…** can check existing import files for duplicates and save a selected export even with source switches off; imported records stay out of the view until **Imports**, **AI chats**, and **Mail** are all on. **Refresh Feeds…**, if you installed a compatible refresh tool, asks before running it, then rereads eligible local sources when it finishes. Neither action invokes Horizon's Mail collection.
+
+**Preview limitation:** Live Apple Mail collection and the real macOS Automation prompt were not verified in build 10; the Mail flow was tested with a mock. You can import a local `.mbox` export instead.
 
 ## Optional: let Aside find earlier work
 
 Install the skill only if you want Aside to retrieve local references on request. The reviewed **Copy** flow doesn't need the skill or Node.js.
 
-1. Put Contexta Horizon v0.5.2 at `~/Applications/contexta-horizon.app`. Run `node --version` in Terminal. If Node.js is missing, install a supported Node.js LTS release and run the check again.
-2. Download and unzip [Horizon-Aside-skill.zip](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.2/Horizon-Aside-skill.zip). Copy the entire `horizon-resume` folder into `skills/user` under your active Aside account's root. The installed path should be `<Aside account root>/skills/user/horizon-resume/SKILL.md`, with `scripts/lookup.mjs` inside `horizon-resume` and no extra folder from the archive. Open a new Aside chat. To check installation without looking up records, ask if the `horizon-resume` skill is available.
+1. Put Contexta Horizon v0.5.3 at `~/Applications/contexta-horizon.app`. Run `node --version` in Terminal. If Node.js is missing, install a supported Node.js LTS release and run the check again.
+2. Download and unzip [Horizon-Aside-skill.zip](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/Horizon-Aside-skill.zip). Copy the entire `horizon-resume` folder into `skills/user` under your active Aside account's root. The installed path should be `<Aside account root>/skills/user/horizon-resume/SKILL.md`, with `scripts/lookup.mjs` inside `horizon-resume` and no extra folder from the archive. Open a new Aside chat. To check installation without looking up records, ask if the `horizon-resume` skill is available.
 3. Ask **“Where did we leave the Harborline quote?”** (this example needs the sample mailbox, not just the built-in example). No wake word or command is required. **“Let's revisit that quote”** can work if the current chat identifies the project. If the chat already has the answer, Aside uses it. If the project is unclear, Aside asks which one you mean. A bare **“try again”** or a web search doesn't trigger lookup. Say **“Use only this chat”** to rule it out.
 
 The skill sends a short topic query to the local app, which uses the saved period and source switches. If it finds a match, dated reference text enters the **current Aside chat** and may be processed by its model. You aren't asked to press **Copy** first. Use the manual Copy flow if you want to review each title before it enters a chat. See the [Aside integration README](Integrations/Aside/README.md) for more details.
 
 ## Troubleshooting
 
-- **No window or Dock icon:** Horizon is a menu-bar app. Click the calendar icon to open Simple View. If the app doesn't start, check the Mac requirements and any macOS security warning first.
+- **No window or Dock icon:** Horizon is a menu-bar app. Click the `-C-` icon to open Simple View. If the app doesn't start, check the Mac requirements and any macOS security warning first.
 - **No topics or no match:** On a fresh install, try the built-in example before typing. For your own records, use a distinctive project name and check the date range and coverage in **Sources & Settings**. An inferred topic may need more than one related record. An empty result means no match in the current scope, not that the work never happened.
-- **An import succeeded but isn't visible:** Check that **Imports**, **AI chats**, and **Mail** are all on and that the record dates fall in the selected period. If importing failed, choose the extracted export, not the unopened ZIP, and check the import status. Records already imported won't be added again. **Reread Sources** rereads eligible local sources; it doesn't fetch new mail or chats.
-- **Collect from Mail didn't run:** Open Apple Mail yourself and try again if you want to allow access. If you declined the macOS Automation prompt, review **System Settings → Privacy & Security → Automation**. Alternatively, import an `.mbox` export manually without granting Automation permission.
+- **An import succeeded but isn't visible:** Check that **Imports**, **AI chats**, and **Mail** are all on and that the record dates fall in the selected period. If importing failed, choose the extracted export, not the unopened ZIP, and check the import status. Records already imported won't be added again. Use **Read Sources** and choose **Local Sources Only** if asked to reread eligible local records without collecting new mail. This doesn't fetch new chats.
+- **Mail collection wasn't offered or didn't run:** Check the status line. If you want to allow access, turn on **Imports**, **AI chats**, and **Mail**, open Apple Mail yourself, click **Read Sources**, and explicitly choose **Collect from Mail** if offered. If you declined the macOS Automation prompt, review **System Settings → Privacy & Security → Automation**. Alternatively, import an `.mbox` export manually without granting Automation permission.
 - **Aside didn't find references:** Try the same named project in Horizon first. If it works there, check `~/Applications/contexta-horizon.app`, `node --version`, and the skill path for the active Aside account, then try in a new chat. If lookup is unavailable, check whether any enabled source is readable and nonempty. If it reports no match, check the topic and date range.
