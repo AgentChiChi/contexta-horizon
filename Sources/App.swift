@@ -477,6 +477,7 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
 struct HorizonMain {
     @MainActor
     static func main() {
+        if CommandLine.arguments.contains("--aside-lookup") { exit(AsideLookup.run()) }          // headless: answered before anything of AppKit exists
         if CommandLine.arguments.contains("--self-test") { exit(runSelfTest()) }
         if let i = CommandLine.arguments.firstIndex(of: "--check-sample"), i + 1 < CommandLine.arguments.count { exit(runSampleCheck(CommandLine.arguments[i + 1])) }
         if let i = CommandLine.arguments.firstIndex(of: "--smoke-window"), i + 1 < CommandLine.arguments.count { runWindowSmoke(savingTo: CommandLine.arguments[i + 1]) }

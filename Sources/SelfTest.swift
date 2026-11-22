@@ -1,8 +1,9 @@
 // Contexta Horizon — synthetic self-test:  contexta-horizon.app/Contents/MacOS/ContextaHorizon --self-test
 // Fast, deterministic and offline. Everything is fictional and made in a temporary folder (a pretend home), removed at
 // the end. It opens no window, reads no real ~/WorkIndex, touches no clipboard and no settings, and never asks the
-// Mail app anything (the Mail adapter is tested with its Mac side passed in). The one program it starts is a synthetic
-// refresh.command it wrote itself in that temporary folder.
+// Mail app anything (the Mail adapter is tested with its Mac side passed in). The programs it starts are a synthetic
+// refresh.command it wrote itself in that temporary folder, and this same executable with --aside-lookup (the headless
+// lookup, pointed at the temporary folder, with every setting given on its command line).
 
 import AppKit
 import Foundation
@@ -218,6 +219,7 @@ func runSelfTest() -> Int32 {
     let text = hb5.map { Export.simple(task: "", topic: $0, window: h3, coverage: cov5) } ?? ""
     let citeRx = #"^\[[FAM]\d\] \d{4}-\d{2}-\d{2} · (File|AI|Mail) · \S"#
     func citeLines(_ t: String) -> [String] { t.split(separator: "\n").filter { $0.range(of: citeRx, options: .regularExpression) != nil }.map(String.init) }
+    func bareLines(_ t: String) -> [String] { t.split(separator: "\n").filter { $0.range(of: #"^\d{4}-\d{2}-\d{2} · (File|AI|Mail) · \S"#, options: .regularExpression) != nil }.map(String.init) }
     let cites = citeLines(text)
     check("H18", "the handoff is deliberately short: six citations for Harborline, two per record type ([F1] [F2] [A1] [A2] [M1] [M2], direct mentions first, then newest), each a date, the record type and a title, with (inferred) on the one linked only by its tag; one header line, one signal line that says titles are not completed outcomes, the omitted count, and one line of caution about the sources (stale and partial feeds, snapshots)",
           cites.count == 6 && cites.map { String($0.prefix(4)) } == ["[F1]", "[F2]", "[A1]", "[A2]", "[M1]", "[M2]"] && cites[0].hasSuffix(" · File · Harborline Q3 quote.xlsx") && cites[1].hasSuffix(" · File · plan.pdf (inferred)") &&
@@ -257,11 +259,218 @@ func runSelfTest() -> Int32 {
     }
     let tiny1 = Export.simple(task: "", topic: tinyTopic(1), window: h3, coverage: []), tiny1Flagged = Export.simple(task: "Atlas 이어서", topic: tinyTopic(1), window: h3, coverage: cov5)
     let tiny3 = Export.simple(task: "", topic: tinyTopic(3), window: h3, coverage: cov5), four = Export.simple(task: "", topic: tinyTopic(4), window: h3, coverage: cov5)
-    check("H36", "a tiny set gets no preamble longer than its list: with 1 to 3 lines of evidence the handoff is a single header line (topic, period, count, the signal caveat, and any caution about the sources) plus the citations — 2 lines for one record, 4 for three; the task adds one line; from four records on it uses the two header lines, and never says anything was completed",
-          tiny1.split(separator: "\n").count == 2 && tiny1.hasPrefix("Topic: Atlas · " + h3.dayLabel + " · 1 record — titles are signals, not proof of completed work\n[F1] ") &&
-          tiny1Flagged.split(separator: "\n").count == 3 && tiny1Flagged.hasPrefix("Task: Atlas 이어서\nTopic: Atlas · ") && tiny1Flagged.contains(" · Source caution: AI chats: stale, partial · Mail: partial · Imports: snapshot\n[F1] ") &&
-          tiny3.split(separator: "\n").count == 4 && four.split(separator: "\n").count == 7 && four.contains("\nSignals: 4 records (File 4) · 4 direct / 0 inferred") &&
+    check("H36", "a tiny set gets no preamble longer than its list: with 1 to 3 lines of evidence the handoff is a single short header line (the topic unless the task names it, the period, the signal caveat, and any caution about the sources) plus the bare dated lines — 2 lines for one record, 4 for three; the task adds one line; from four records on it uses the two header lines, and never says anything was completed",
+          tiny1.split(separator: "\n").count == 2 && tiny1 == "Topic: Atlas · " + h3.shortLabel + " · titles are signals, not proof of completed work\n" + Dates.day(real) + " · File · Atlas 문서 0\n" &&
+          tiny1Flagged.split(separator: "\n").count == 3 && tiny1Flagged == "Task: Atlas 이어서\n" + h3.shortLabel + " · titles are signals, not proof of completed work · Source caution: AI chats: stale, partial · Mail: partial · Imports: snapshot\n" + Dates.day(real) + " · File · Atlas 문서 0\n" &&
+          tiny3.split(separator: "\n").count == 4 && four.split(separator: "\n").count == 7 && four.hasPrefix("Topic: Atlas · " + h3.dayLabel + "\nSignals: 4 records (File 4) · 4 direct / 0 inferred — title counts are signals, not proof of completed work\n[F1] ") && citeLines(four).count == 4 && citeLines(tiny3).isEmpty &&
           [tiny1, tiny3, four, text].allSatisfy { t in claimsNoOutcome(t) }, tiny1 + "---" + tiny1Flagged + "---" + four)
+
+    // ── round 1 (0.5.1): the 1–3 row packet costs little more than its list ──
+    /// The 0.5.0 text for a small topic, rebuilt here only to measure against.
+    func oldSmall(task t: String, _ topic: TopicSummary, _ w: HorizonWindow, _ cov: [SourceCoverage]) -> String {
+        var l = t.isEmpty ? [String]() : ["Task: " + Redact.label(t, max: 140)]
+        l.append("Topic: \(Redact.label(topic.display, max: 60)) · \(w.dayLabel) · \(plural(topic.items.count, "record")) — titles are signals, not proof of completed work" + (Export.caption(cov).map { " · Source caution: " + Redact.label($0, max: 120) } ?? ""))
+        let words = Search.tokens(Redact.label(t, max: 140)).filter { !Set(topic.key.split(separator: " ").map(String.init)).contains($0) }
+        func fits(_ it: TopicItem) -> Int { it.evidence.derivedTitle ? 0 : words.filter { Topic.named(in: it.evidence.title, key: $0) }.count }
+        var n: [RecordType: Int] = [:]
+        for ty in RecordType.allCases {
+            for it in topic.items.filter({ $0.evidence.type == ty }).sorted(by: { (fits($0), $0.direct ? 1 : 0, $0.evidence.date) > (fits($1), $1.direct ? 1 : 0, $1.evidence.date) }).prefix(Export.maxCitations) {
+                n[ty, default: 0] += 1
+                l.append("[" + ty.letter + String(n[ty]!) + "] " + Dates.day(it.evidence.date, w.calendar) + " · " + ty.label + " · " + Redact.label(it.evidence.title) + (it.direct ? "" : " (inferred)"))
+            }
+        }
+        return l.joined(separator: "\n") + "\n"
+    }
+    func pieces(_ t: String) -> Int { (try? NSRegularExpression(pattern: #"\p{L}+|\d|[^\s\p{L}\d]"#))?.numberOfMatches(in: t, range: NSRange(t.startIndex..., in: t)) ?? 0 }
+    let proofTopic = TopicSummary(key: "bellwater", display: "Bellwater", items: [
+        TopicItem(evidence: ev(real.addingTimeInterval(-1 * 86400), origin: .files, type: .file, title: "Bellwater proof request for bob@example.com /Users/mina/proofs/final.pdf"), direct: true, count: 1),
+        TopicItem(evidence: ev(real.addingTimeInterval(-2 * 86400), origin: .ai, type: .ai, title: "layout handover checklist"), direct: false, count: 1)], types: [.file, .ai])
+    let proofTask = "For Bellwater, what does the proof request specify? " + String(repeating: "and the delivery window ", count: 3) + "cc dana@example.com"
+    let smallNew = Export.simple(task: proofTask, topic: proofTopic, window: h3, coverage: cov5), smallOld = oldSmall(task: proofTask, proofTopic, h3, cov5)
+    let smallLines = smallNew.split(separator: "\n").map(String.init)
+    let unnamed = Export.simple(task: "what does the proof request specify?", topic: proofTopic, window: h3, coverage: []), hiddenName = Export.simple(task: "see /Users/mina/bellwater/proof.pdf", topic: proofTopic, window: h3, coverage: [])
+    let smallA = Calendar.current.startOfDay(for: real.addingTimeInterval(-26 * 86400)), smallB = Calendar.current.startOfDay(for: real.addingTimeInterval(-17 * 86400))
+    let customSmall = Export.simple(task: "Bellwater proof", topic: proofTopic, window: HorizonWindow(customStart: smallA, customEnd: smallB, now: real), coverage: [])
+    // what Horizon adds around the task and the rows themselves (which are the same in both)
+    let given = pieces(smallLines.first ?? "") + pieces(bareLines(smallNew).joined(separator: "\n"))
+    let overheadNew = pieces(smallNew) - given, overheadOld = pieces(smallOld) - given
+    let plainNew = pieces(Export.simple(task: proofTask, topic: proofTopic, window: h3, coverage: [])) - given, plainOld = pieces(oldSmall(task: proofTask, proofTopic, h3, [])) - given
+    check("H48", "round 1 — a 1–3 row packet is close to the size of its list: the header keeps the period (\"3 months to <last day>\", or the two days of a custom period), the caveat that titles are not proof, and the caution about the sources; each line keeps its date, record type, redacted title and the (inferred) mark; the whole task stays (redacted, as before); what goes is what the list already says — the count, the [F1] handles, and the topic's name when the task names it. Measured on a two-row packet: what Horizon adds around the task and the two rows is at most half of what 0.5.0 added, and with a caution about the sources (which stays in full) still 20 pieces smaller",
+          smallLines.count == 4 && smallLines[0] == "Task: " + Redact.label(proofTask, max: 140) && smallLines[0].contains("delivery window and the delivery window") && smallLines[0].hasSuffix("cc [email]") &&
+          smallLines[1] == h3.shortLabel + " · titles are signals, not proof of completed work · Source caution: AI chats: stale, partial · Mail: partial · Imports: snapshot" && h3.shortLabel == "3 months to " + Dates.day(real) &&
+          smallLines[2] == Dates.day(real.addingTimeInterval(-86400)) + " · File · Bellwater proof request for [email] [path]" && smallLines[3] == Dates.day(real.addingTimeInterval(-2 * 86400)) + " · AI · layout handover checklist (inferred)" &&
+          !smallNew.contains("[F1]") && !smallNew.contains("[A1]") && !smallNew.contains("@") && !smallNew.contains("/Users") && claimsNoOutcome(smallNew) && smallNew.components(separatedBy: "not proof of completed work").count == 2 &&
+          bareLines(smallNew) == citeLines(smallOld).map { String($0.dropFirst(5)) } && plainNew * 2 <= plainOld && plainNew > 0 && overheadNew <= overheadOld - 20 && overheadNew - plainNew == overheadOld - plainOld && smallNew.count < smallOld.count - 40 &&
+          customSmall.hasPrefix("Task: Bellwater proof\n" + Dates.day(smallA) + " – " + Dates.day(smallB) + " (both days included) · titles are signals, not proof of completed work\n"),
+          "added around the task and rows: old \(plainOld) → new \(plainNew) pieces; with the caution: old \(overheadOld) → new \(overheadNew)\n" + smallNew + "---\n" + smallOld)
+    let fourTopic = TopicSummary(key: "bellwater", display: "Bellwater", items: proofTopic.items + [TopicItem(evidence: ev(real.addingTimeInterval(-3 * 86400), origin: .mail, type: .mail, title: "Bellwater proof reply"), direct: true, count: 1), TopicItem(evidence: ev(real.addingTimeInterval(-4 * 86400), origin: .mail, type: .mail, title: "Bellwater schedule"), direct: true, count: 1)], types: [.file, .ai, .mail])
+    let fourText = Export.simple(task: "Bellwater proof", topic: fourTopic, window: h3, coverage: [])
+    check("H49", "round 1 leaves everything else alone: the topic's name stays in the header when there is no task, when the task does not name it, and when the name occurs only inside a part of the task that is redacted (a path); a packet of four or more rows keeps its two header lines, its counts and its [F1] handles exactly as before",
+          unnamed.hasPrefix("Task: what does the proof request specify?\nTopic: Bellwater · " + h3.shortLabel + " · titles are signals, not proof of completed work\n") &&
+          hiddenName.hasPrefix("Task: see [path]\nTopic: Bellwater · " + h3.shortLabel + " · ") && !hiddenName.lowercased().contains("/users") &&
+          Export.simple(task: "", topic: proofTopic, window: h3, coverage: []).hasPrefix("Topic: Bellwater · " + h3.shortLabel + " · titles are signals, not proof of completed work\n" + Dates.day(real.addingTimeInterval(-86400)) + " · File · ") &&
+          fourText.hasPrefix("Task: Bellwater proof\nTopic: Bellwater · " + h3.dayLabel + "\nSignals: 4 records (File 1 · AI 1 · Mail 2) · 3 direct / 1 inferred — title counts are signals, not proof of completed work\n[F1] ") && citeLines(fourText).count == 4 && bareLines(fourText).isEmpty,
+          unnamed + "---" + hiddenName + "---" + fourText)
+
+    // a small packet whose task asks "when" keeps the 0.5.0 text (release gate: the short form drew a made-up time from a small model)
+    let meet = TopicSummary(key: "bellwater", display: "Bellwater", items: [
+        TopicItem(evidence: ev(real.addingTimeInterval(-1 * 86400), origin: .mail, type: .mail, title: "Bellwater 회의 안건"), direct: true, count: 1),
+        TopicItem(evidence: ev(real.addingTimeInterval(-3 * 86400), origin: .files, type: .file, title: "Bellwater meeting notes for bob@example.com"), direct: true, count: 1),
+        TopicItem(evidence: ev(real.addingTimeInterval(-2 * 86400), origin: .ai, type: .ai, title: "layout handover checklist"), direct: false, count: 1)], types: [.file, .ai, .mail])
+    let whenTasks = ["회의가 언제지?", "Bellwater 회의 날짜 알려줘", "며칠에 하기로 했지", "회의 시간이 몇 시야", "When is the Bellwater meeting?", "What date was agreed for Bellwater?", "what time does it start"]
+    let whenTexts = whenTasks.map { Export.simple(task: $0, topic: meet, window: h3, coverage: cov5) }
+    check("H57", "a small packet whose task asks when keeps the 0.5.0 text exactly: for 1–3 rows and a task with when / date / time or 언제 / 며칠 / 날짜 / 시간 the handoff is byte for byte what 0.5.0 wrote — \"Topic: <name> · <full period> · N records — titles are signals, not proof of completed work\", the caution about the sources, and numbered dated lines — with and without a caution, in a preset and in a custom period",
+          zip(whenTasks, whenTexts).allSatisfy { q, t in t == oldSmall(task: q, meet, h3, cov5) && Array(t.utf8) == Array(oldSmall(task: q, meet, h3, cov5).utf8) } &&
+          whenTexts[0] == "Task: 회의가 언제지?\nTopic: Bellwater · " + h3.dayLabel + " · 3 records — titles are signals, not proof of completed work · Source caution: AI chats: stale, partial · Mail: partial · Imports: snapshot\n[F1] " + Dates.day(real.addingTimeInterval(-3 * 86400)) + " · File · Bellwater meeting notes for [email]\n[A1] " + Dates.day(real.addingTimeInterval(-2 * 86400)) + " · AI · layout handover checklist (inferred)\n[M1] " + Dates.day(real.addingTimeInterval(-86400)) + " · Mail · Bellwater 회의 안건\n" &&
+          Export.simple(task: "When is the Bellwater meeting?", topic: meet, window: HorizonWindow(customStart: smallA, customEnd: smallB, now: real), coverage: []) == oldSmall(task: "When is the Bellwater meeting?", meet, HorizonWindow(customStart: smallA, customEnd: smallB, now: real), []) &&
+          Export.simple(task: "언제였지", topic: tinyTopic(1), window: h3, coverage: []) == oldSmall(task: "언제였지", tinyTopic(1), h3, []) && whenTasks.allSatisfy { Export.asksWhen($0) },
+          whenTexts[0] + "---" + oldSmall(task: whenTasks[0], meet, h3, cov5))
+    let notWhen = ["회의 안건 정리해줘", "What does the Bellwater meeting cover?", "Bellwater timeline and update", "sometimes dated notes", "Bellwater 회의", ""]
+    let notWhenTexts = notWhen.map { Export.simple(task: $0, topic: meet, window: h3, coverage: cov5) }
+    let fourWhen = Export.simple(task: "When is the Bellwater proof due?", topic: fourTopic, window: h3, coverage: [])
+    check("H58", "only that case: a small packet with any other task — or none — stays in the short form (no count, no [F1] handles, the short period), words that merely contain \"time\" or \"date\" (timeline, sometimes, update, dated) do not count, and a packet of four or more rows is written as always whatever the task asks",
+          zip(notWhen, notWhenTexts).allSatisfy { q, t in !Export.asksWhen(q) && t != oldSmall(task: q, meet, h3, cov5) && !t.contains("[F1]") && !t.contains("3 records") && t.contains(h3.shortLabel + " · titles are signals, not proof of completed work · Source caution: ") && bareLines(t).count == 3 } &&
+          notWhenTexts[1].hasPrefix("Task: What does the Bellwater meeting cover?\n" + h3.shortLabel + " · ") && notWhenTexts[5].hasPrefix("Topic: Bellwater · " + h3.shortLabel + " · ") &&
+          fourWhen.hasPrefix("Task: When is the Bellwater proof due?\nTopic: Bellwater · " + h3.dayLabel + "\nSignals: 4 records (File 1 · AI 1 · Mail 2) · 3 direct / 1 inferred — title counts are signals, not proof of completed work\n[F1] ") && citeLines(fourWhen).count == 4,
+          notWhenTexts[0] + "---" + fourWhen)
+
+    // ── round 2 (0.5.1): which six lines — chains of the same thing shown once, older one-off records not buried ──
+    /// The 0.5.0 choice, kept here only to compare with.
+    func oldCitations(_ topic: TopicSummary, prefer: [String] = []) -> [String] {
+        let nameWords = Set(topic.key.split(separator: " ").map(String.init)), words = prefer.filter { !nameWords.contains($0) }
+        func fits(_ it: TopicItem) -> Int { it.evidence.derivedTitle ? 0 : words.filter { Topic.named(in: it.evidence.title, key: $0) }.count }
+        func ranked(_ list: [TopicItem]) -> [TopicItem] { list.sorted { (fits($0), $0.direct ? 1 : 0, $0.evidence.date) > (fits($1), $1.direct ? 1 : 0, $1.evidence.date) } }
+        var chosen: [TopicItem] = [], rest: [TopicItem] = []
+        for t in topic.types { let r = ranked(topic.items.filter { $0.evidence.type == t }); chosen += r.prefix(2); rest += r.dropFirst(2) }
+        chosen += ranked(rest).prefix(max(0, Export.maxCitations - chosen.count))
+        chosen = Array(chosen.prefix(Export.maxCitations))
+        var n: [RecordType: Int] = [:], out: [String] = []
+        for t in RecordType.allCases { for it in ranked(chosen.filter { $0.evidence.type == t }) { n[t, default: 0] += 1; out.append("[" + t.letter + String(n[t]!) + "] " + it.evidence.id) } }
+        return out
+    }
+    func newCitations(_ topic: TopicSummary, prefer: [String] = []) -> [String] { Export.citations(topic, prefer: prefer).map { $0.label + " " + $0.item.evidence.id } }
+    func made(_ key: String, _ rows: [(String, Double, RecordType)]) -> TopicSummary {
+        let items = rows.map { r in TopicItem(evidence: ev(real.addingTimeInterval(-r.1 * 86400), origin: r.2.governing, type: r.2, title: r.0), direct: true, count: 1) }.sorted { $0.evidence.date > $1.evidence.date }
+        return TopicSummary(key: key.lowercased(), display: key, items: items, types: RecordType.allCases.filter { t in items.contains { $0.evidence.type == t } })
+    }
+    func shown(_ topic: TopicSummary, task t: String = "") -> [String] { Export.citations(topic, prefer: Search.tokens(t), asking: Standing.asked(t)).map { $0.label + " " + $0.item.evidence.title } }
+    let lumen = made("Lumen", [("Lumen quote v1.xlsx", 30, .file), ("Lumen quote v2.xlsx", 20, .file), ("Lumen quote v3.xlsx", 2, .file), ("Lumen quote v3 (2).xlsx", 1, .file), ("Lumen site survey findings.pdf", 50, .file),
+                               ("Lumen pricing notes / revision 1", 25, .ai), ("Lumen pricing notes / revision 2", 9, .ai), ("Lumen 견적서 수정 2", 8, .ai), ("Lumen 견적서 2차 수정본", 7, .ai), ("Lumen 견적서 수정 3", 4, .ai), ("Lumen kickoff summary", 60, .ai),
+                               ("Lumen delivery slots", 12, .mail), ("Lumen delivery slots", 11, .mail), ("Re: Lumen delivery slots", 10, .mail), ("RE: Re: Lumen delivery slots", 6, .mail), ("Fwd: Lumen delivery slots", 3, .mail), ("Lumen warehouse access rules", 40, .mail)])
+    let lumenShown = shown(lumen), lumenText = Export.simple(task: "", topic: lumen, window: h3, coverage: [])
+    let oneChain = made("Orrin", (1...8).map { ("Orrin layout draft \($0).sketch", Double(40 - $0 * 4), RecordType.file) })
+    check("H50", "round 2 — the six lines are six different things: numbered revisions, copies, replies and forwards of one title (English and Korean marks) are one chain shown by its newest member; each record type keeps its best line plus one more, and for that second line an older one-off record comes before another recurring one (the survey from 50 days ago, the kickoff from 60, the access rules from 40); the task still decides first (a word of the task, also as a plural, puts its line on top); and when a topic is one chain only, the places are filled with its earlier versions, the first one included",
+          lumenShown == ["[F1] Lumen quote v3 (2).xlsx", "[F2] Lumen site survey findings.pdf", "[A1] Lumen 견적서 수정 3", "[A2] Lumen kickoff summary", "[M1] Fwd: Lumen delivery slots", "[M2] Lumen warehouse access rules"] &&
+          Set(Export.citations(lumen).map { Export.stem($0.item.evidence.title) }).count == 6 && lumenText.contains("\n11 more not shown\n") && lumenText.contains("Signals: 17 records (File 5 · AI 6 · Mail 6)") &&
+          shown(lumen, task: "Lumen pricing")[2] == "[A1] Lumen pricing notes / revision 2" && shown(lumen, task: "Lumen pricing")[3] == "[A2] Lumen kickoff summary" && shown(lumen, task: "what did the survey finding say")[0] == "[F1] Lumen site survey findings.pdf" &&
+          shown(lumen, task: "delivery slot")[4] == "[M1] Fwd: Lumen delivery slots" && Export.mentions("48 cartons; pickup Thursday", word: "carton") && Export.mentions("policy update", word: "policies") && !Export.mentions("cartoons", word: "carton") &&
+          shown(oneChain) == ["[F1] Orrin layout draft 8.sketch", "[F2] Orrin layout draft 7.sketch", "[F3] Orrin layout draft 6.sketch", "[F4] Orrin layout draft 5.sketch", "[F5] Orrin layout draft 4.sketch", "[F6] Orrin layout draft 1.sketch"] &&
+          Export.stem("RE: Fwd: 답장: Lumen 견적서 (2).xlsx") == "lumen 견적서.xlsx" && Export.stem("Plan - v2.1 (copy).pdf") == Export.stem("Plan.pdf") && Export.stem("Budget copy 2.xlsx") == "budget.xlsx" && Export.stem("계약서 개정 3판") == "계약서",
+          lumenShown.joined(separator: " | ") + " // " + shown(oneChain).joined(separator: " | ") + " // " + [Export.stem("RE: Fwd: 답장: Lumen 견적서 (2).xlsx"), Export.stem("Plan - v2.1 (copy).pdf"), Export.stem("Budget copy 2.xlsx"), Export.stem("계약서 개정 3판")].joined(separator: " | "))
+    let plain = made("Vesper", [("Vesper Phase 2 plan", 3, .file), ("Vesper Phase 3 plan", 5, .file), ("Vesper Q3 report", 9, .file), ("Vesper Q4 report", 12, .file), ("Vesper 2차 미팅 메모", 4, .ai), ("Vesper 3차 미팅 메모", 6, .ai), ("Vesper cap 17 units", 30, .ai),
+                                ("Vesper cap 12 units", 8, .ai), ("Vesper design review", 2, .mail), ("Vesper design revision", 7, .mail), ("Vesper hard copy", 10, .mail), ("Vesper Phase 2 plan", 11, .mail)])
+    let sameAsBefore = [(hb5!, ""), (hb5!, task), (nasty, ""), (plain, ""), (plain, "Vesper report and cap"), (tinyTopic(3), ""), (proofTopic, proofTask)].allSatisfy { t, q in newCitations(t, prefer: Search.tokens(Redact.label(q, max: 140))) == oldCitations(t, prefer: Search.tokens(Redact.label(q, max: 140))) }
+    check("H51", "round 2 changes nothing where nothing repeats: for topics whose titles are all different the choice is exactly the 0.5.0 one, with and without a task (the rule for tasks that ask where something stands is round 3, tested below); a bare number is not a revision mark (Phase 2 / Phase 3, Q3 / Q4, 2차 미팅 / 3차 미팅, \"cap 17 units\" / \"cap 12 units\" stay separate lines), nor is \"review\", \"revision\" without a number, or \"hard copy\"; a title that is only a mark keeps itself; the same title as a file and as a mail is two lines, one per type; and no topic name, value or question is known to the code (a made-up topic behaves the same)",
+          sameAsBefore && Set(plain.items.map { Export.stem($0.evidence.title) }).count == 11 && Export.stem("Vesper Phase 2 plan") != Export.stem("Vesper Phase 3 plan") && Export.stem("Vesper 2차 미팅 메모") == "vesper 2차 미팅 메모" &&
+          Export.stem("Revision 3") == "revision 3" && Export.stem("v2") == "v2" && Export.stem("Design review") == "design review" && Export.stem("Budget review 2026") == "budget review 2026" && Export.stem("Vesper hard copy") == "vesper hard copy" &&
+          shown(plain).contains("[F1] Vesper Phase 2 plan") && shown(plain).contains("[M2] Vesper design revision") && shown(plain).filter { $0.hasSuffix("Vesper Phase 2 plan") }.count == 1 &&
+          shown(made("Vesper", [("Vesper Phase 2 plan", 3, .file), ("Vesper Phase 2 plan", 11, .mail)])) == ["[F1] Vesper Phase 2 plan", "[M1] Vesper Phase 2 plan"],
+          "same=\(sameAsBefore) stems=\(Set(plain.items.map { Export.stem($0.evidence.title) }).count) " + shown(plain).joined(separator: " | "))
+
+    // ── round 3 (0.5.1): when the task asks where something stands — decisions, limits, and what is pending or corrected ──
+    let marrow = made("Marrow", [("Marrow approved cap 17 units per order", 40, .mail), ("Marrow correction: cap lowered to 12 units", 6, .mail), ("Marrow weekly sync", 12, .mail), ("Re: Marrow weekly sync", 9, .mail), ("Re: Marrow weekly sync", 5, .mail),
+                                 ("RE: Re: Marrow weekly sync", 1, .mail), ("Marrow parking reminder", 3, .mail), ("Marrow lunch order", 2, .mail),
+                                 ("Marrow rollout plan v1.pdf", 30, .file), ("Marrow rollout plan v2.pdf", 20, .file), ("Marrow rollout plan v3.pdf", 10, .file), ("Marrow rollout plan v4.pdf", 2, .file), ("Marrow pricing sheet.xlsx", 5, .file),
+                                 ("Marrow contract draft sent for signature - not signed", 9, .file), ("Marrow budget 2026 summary with 14 line items and 3 totals", 4, .file),
+                                 ("Marrow brainstorm notes", 1, .ai), ("Marrow naming ideas", 3, .ai), ("Marrow retro summary", 8, .ai)])
+    let askOpen = "How many are permitted now, and is anything still unsettled?", askNamed = "Was the Marrow contract signed, and what is the cap now?"
+    let marrowOpen = shown(marrow, task: askOpen), marrowNamed = shown(marrow, task: askNamed)
+    let marrowText = Export.simple(task: askOpen, topic: marrow, window: h3, coverage: [])
+    let marrowLines = marrowText.split(separator: "\n").map(String.init)
+    func at(_ list: [String], _ title: String) -> Int { list.firstIndex { $0.hasSuffix(title) } ?? -1 }
+    let sora = made("Sora", [("Sora 한도 예외 승인: 상한 17개", 40, .mail), ("Sora 정정: 상한 12개로 변경", 5, .mail), ("Sora 주간 회의록 수정 1", 20, .mail), ("Sora 주간 회의록 수정 2", 13, .mail), ("Sora 주간 회의록 수정 3", 2, .mail), ("Sora 점심 메뉴", 3, .mail),
+                             ("Sora 계약서 초안 검토 중 - 서명 미확정", 9, .file), ("Sora 일정표.xlsx", 1, .file), ("Sora 견적 14건 합계 3종", 4, .file)])
+    let soraShown = shown(sora, task: "현재 Sora 한도가 얼마로 확정됐나요?")
+    func m(_ t: String) -> String { let x = Standing.marks(title: t); return ["-", "d", "D"][x.decision] + ["-", "p", "P"][x.pending] }       // capital: in so many words; small: weakly
+    check("H52", "round 3 — when the task asks where something stands (what is permitted, signed, final, current; 확정, 한도, 현재), titles that speak of a decision or limit and titles that speak of something pending or corrected are shown together, in English and in Korean: the older approval and the newer correction both appear, the unsigned draft appears, and they come before other candidates for a type's second line — without any word of the task matching them; within a type the lines run newest first, so the correction stands above the approval it follows; each type still keeps its best line (the newest one here); the words of the task still decide first; and nothing is added to a line or concluded in the header",
+          marrowOpen == ["[F1] Marrow rollout plan v4.pdf", "[F2] Marrow contract draft sent for signature - not signed", "[A1] Marrow brainstorm notes", "[M1] RE: Re: Marrow weekly sync", "[M2] Marrow correction: cap lowered to 12 units", "[M3] Marrow approved cap 17 units per order"] &&
+          at(marrowOpen, "cap lowered to 12 units") < at(marrowOpen, "approved cap 17 units per order") && at(marrowOpen, "14 line items and 3 totals") == -1 &&
+          marrowNamed == ["[F1] Marrow budget 2026 summary with 14 line items and 3 totals", "[F2] Marrow contract draft sent for signature - not signed", "[A1] Marrow brainstorm notes", "[A2] Marrow naming ideas", "[M1] Marrow correction: cap lowered to 12 units", "[M2] Marrow approved cap 17 units per order"] &&
+          marrowLines.count == 10 && marrowLines[0] == "Task: " + askOpen && marrowLines[1] == "Topic: Marrow · " + h3.dayLabel && marrowLines[2] == "Signals: 18 records (File 7 · AI 3 · Mail 8) · 18 direct / 0 inferred — title counts are signals, not proof of completed work" && marrowLines[9] == "12 more not shown" &&
+          citeLines(marrowText).count == 6 && citeLines(marrowText).allSatisfy { l in marrow.items.contains { l.hasSuffix(" · " + $0.evidence.title) } } && claimsNoOutcome(marrowText) &&
+          soraShown == ["[F1] Sora 일정표.xlsx", "[F2] Sora 견적 14건 합계 3종", "[F3] Sora 계약서 초안 검토 중 - 서명 미확정", "[M1] Sora 점심 메뉴", "[M2] Sora 정정: 상한 12개로 변경", "[M3] Sora 한도 예외 승인: 상한 17개"] &&
+          m("draft agreement sent for legal review; signature not confirmed") == "-P" && m("original exception: cap 17 units; review February") == "D-" && m("Decision: cap stays at 12; no longer subject to review") == "DP" &&
+          m("한도 예외 승인: 상한 17개") == "D-" && m("계약서 초안 검토 중 - 서명 미확정") == "-P" && m("정정: 상한 12개로 변경") == "DP" && m("승인 보류") == "-P" && m("승인 완료") == "D-" && m("contract draft v3") == "-p" && m("계약서 초안") == "-p" &&
+          Standing.asked(askOpen) && Standing.asked(askNamed) && Standing.asked("현재 한도가 얼마로 확정됐나요?") && Standing.asked("is it still on hold?") && Standing.asked("아직 미정인가요"),
+          marrowOpen.joined(separator: " | ") + " // " + marrowNamed.joined(separator: " | ") + " // " + soraShown.joined(separator: " | ") + " // " + marrowText)
+    let generated = Evidence(origin: .ai, type: .ai, id: "g", title: "Marrow approved final decision summary", date: real.addingTimeInterval(-86400), dayOnly: false, source: "s", topics: [], locator: "", importedAt: nil, via: "feed", derivedTitle: true)
+    let marrowPlain = shown(marrow, task: "Marrow rollout plan")
+    let quiet = ["weekly operations review", "progress review and outstanding documentation", "budget 2026 summary with 14 line items and 3 totals", "capital plan for the unlimited tier", "Limited edition artwork", "signing ceremony photos", "designed layout", "Q3 update notes 17 units", "주간 회의록", "견적 14건 합계 3종", "일정 확인",
+                 "approval meeting agenda", "approval calendar", "decision log template", "policy onboarding checklist", "deadline reminder", "승인 회의 안건", "승인 일정 캘린더", "결정 사안 목록 양식", "정책 온보딩 체크리스트"]
+    check("H53", "round 3 applies only where it is relevant and never guesses: a task that does not ask about standing leaves the choice as round 2 made it (the correction, the approval and the draft are not pulled in); a task that asks, on a topic whose titles say nothing of the kind, changes nothing; numbers, \"review\", \"update\", \"notes\", look-alike words (capital, unlimited, Limited, signing, designed) and nouns that only name the subject (approval, decision, policy, deadline; 승인, 결정, 정책) are not marks; \"not confirmed\" and 미확정 are read as pending, never as confirmed; a machine-generated title carries no mark; a task that only follows up or compares does not count as asking",
+          marrowPlain == ["[F1] Marrow rollout plan v4.pdf", "[F2] Marrow budget 2026 summary with 14 line items and 3 totals", "[A1] Marrow brainstorm notes", "[A2] Marrow naming ideas", "[M1] RE: Re: Marrow weekly sync", "[M2] Marrow lunch order"] &&
+          !Standing.asked("Marrow rollout plan") && !Standing.asked("Follow up on the Harborline quote") && !Standing.asked("compare harborline and atlas") && !Standing.asked("Harborline 견적 회신 이어서 쓰기") && !Standing.asked("") &&
+          shown(lumen, task: "is anything still pending now?") == lumenShown && shown(plain.items.isEmpty ? plain : made("Vesper", [("Vesper Phase 2 plan", 3, .file), ("Vesper Q3 report", 9, .file), ("Vesper design notes", 4, .mail)]), task: "what is the current status?") == ["[F1] Vesper Phase 2 plan", "[F2] Vesper Q3 report", "[M1] Vesper design notes"] &&
+          quiet.allSatisfy { m($0) == "--" } && m("signature not confirmed") == "-P" && m("서명 미확정") == "-P" && m("not yet approved by legal") == "-P" && m("confirmed") == "D-" &&
+          Standing.marks(generated) == (0, 0) && Standing.marks(title: generated.title) == (2, 0),
+          marrowPlain.joined(separator: " | ") + " // " + quiet.map { $0 + "=" + m($0) }.joined(separator: ", "))
+    // routine titles that all carry the subject's noun must not crowd out the two lines that say where it stands
+    func crowded(_ name: String, _ routine: [String], _ paused: String, _ limited: String, split: Bool) -> TopicSummary {
+        var rows: [(String, Double, RecordType)] = []
+        for (i, r) in routine.enumerated() { rows.append((name + " " + r, Double(i + 1), split ? [RecordType.mail, .file, .file, .ai, .ai, .mail][i % 6] : .mail)) }
+        rows.append((name + " " + paused, 30, .mail)); rows.append((name + " " + limited, 45, .mail))
+        return made(name, rows)
+    }
+    let routineEN = ["approval meeting agenda", "approval calendar invite", "approval onboarding checklist", "approval workflow overview", "approval contacts list", "approval training slides"]
+    let routineKO = ["승인 회의 안건", "승인 일정 캘린더", "승인 온보딩 체크리스트", "승인 절차 개요", "승인 담당자 목록", "승인 교육 자료"]
+    let pausedEN = "approval paused pending inspection", limitedEN = "approval conditional on quantity 40", pausedKO = "승인 보류 - 점검 대기", limitedKO = "수량 40개 조건부 승인"
+    let crowdRuns: [(String, [String])] = [("EN one type", shown(crowded("Kestrel", routineEN, pausedEN, limitedEN, split: false), task: "Is the Kestrel approval in force?")),
+                                           ("EN three types", shown(crowded("Kestrel", routineEN, pausedEN, limitedEN, split: true), task: "Is the Kestrel approval in force?")),
+                                           ("KO one type", shown(crowded("Haneul", routineKO, pausedKO, limitedKO, split: false), task: "Haneul 승인이 지금 유효한가요?")),
+                                           ("KO three types", shown(crowded("Haneul", routineKO, pausedKO, limitedKO, split: true), task: "Haneul 승인이 지금 유효한가요?"))]
+    let draftCrowd = made("Ibis", [("Ibis approval draft agenda", 1, .mail), ("Ibis approval draft calendar", 2, .mail), ("Ibis draft onboarding", 1, .file), ("Ibis draft workflow", 3, .file), ("Ibis draft contacts", 2, .ai), ("Ibis draft slides", 4, .ai),
+                                   ("Ibis approval paused pending inspection", 30, .mail), ("Ibis approval conditional on quantity 40", 45, .mail)])
+    let draftShown = shown(draftCrowd, task: "Is the Ibis approval in force?")
+    let noPair = shown(made("Kestrel", routineEN.enumerated().map { (i, r) in ("Kestrel " + r, Double(i + 1), [RecordType.mail, .file, .ai][i % 3]) } + [("Kestrel floor plan", 30, .mail)]), task: "Is the Kestrel approval in force?")
+    check("H55", "round 3 under crowding — six routine titles that all carry the subject's noun (an approval agenda, calendar, checklist …; 승인 회의 안건, 일정 …) and two older titles that say where it stands (paused pending inspection; conditional on a quantity — 보류·대기; 조건부): both older lines are shown, in English and in Korean, whether everything is mail or spread over three types; each type keeps its newest line; the paused line and the conditional line take the place of the weakest other line, also when the routine titles are themselves weakly marked (\"draft\"); and when no title says where the thing stands, the routine noun changes nothing (the choice is the plain one)",
+          crowdRuns.allSatisfy { _, list in list.count == 6 && list.filter { $0.contains("paused pending inspection") || $0.contains("보류 - 점검 대기") }.count == 1 && list.filter { $0.contains("conditional on quantity 40") || $0.contains("조건부 승인") }.count == 1 } &&
+          crowdRuns[0].1 == ["[M1] Kestrel approval meeting agenda", "[M2] Kestrel approval calendar invite", "[M3] Kestrel approval onboarding checklist", "[M4] Kestrel approval workflow overview", "[M5] Kestrel approval paused pending inspection", "[M6] Kestrel approval conditional on quantity 40"] &&
+          crowdRuns[1].1.contains("[M1] Kestrel approval meeting agenda") && crowdRuns[1].1.contains("[F1] Kestrel approval calendar invite") && crowdRuns[1].1.contains("[A1] Kestrel approval workflow overview") &&
+          crowdRuns[3].1.contains("[M1] Haneul 승인 회의 안건") && crowdRuns[3].1.contains("[F1] Haneul 승인 일정 캘린더") && crowdRuns[3].1.contains("[A1] Haneul 승인 절차 개요") &&
+          draftShown.count == 6 && draftShown.contains { $0.hasSuffix("paused pending inspection") } && draftShown.contains { $0.hasSuffix("conditional on quantity 40") } && draftShown.contains("[M1] Ibis approval draft agenda") && draftShown.contains { $0.hasPrefix("[F1] Ibis draft onboarding") } && draftShown.contains { $0.hasPrefix("[A1] Ibis draft contacts") } &&
+          noPair == ["[F1] Kestrel approval calendar invite", "[F2] Kestrel approval contacts list", "[A1] Kestrel approval onboarding checklist", "[A2] Kestrel approval training slides", "[M1] Kestrel approval meeting agenda", "[M2] Kestrel approval workflow overview"] &&
+          m(pausedEN) == "-P" && m(limitedEN) == "D-" && m(pausedKO) == "-P" && m(limitedKO) == "D-" && routineEN.allSatisfy { m($0) == "--" } && routineKO.allSatisfy { m($0) == "--" },
+          crowdRuns.map { $0.0 + ": " + $0.1.joined(separator: " | ") }.joined(separator: " // ") + " // draft: " + draftShown.joined(separator: " | ") + " // none: " + noPair.joined(separator: " | "))
+
+    // a stated condition and a bound on a number are limits; the noun "condition" and a number alone are not
+    let boundKO = shown(crowded("Haneul", routineKO, pausedKO, "승인 조건: 상자당 8개 이하", split: true), task: "Haneul 승인이 지금 유효한가요?")
+    let boundOnly = shown(crowded("Haneul", routineKO, pausedKO, "상자당 12개 미만으로 출고", split: false), task: "Haneul 승인이 지금 유효한가요?")
+    let boundEN = shown(crowded("Kestrel", routineEN, pausedEN, "approval condition: 8 per box", split: true), task: "Is the Kestrel approval in force?")
+    let nounOnly = shown(crowded("Haneul", routineKO, pausedKO, "승인 조건 설명회", split: true), task: "Haneul 승인이 지금 유효한가요?")
+    let limits = ["승인 조건: 상자당 8개 이하", "조건 : 선금 30%", "상자당 8개 이하", "10kg 미만", "3일 이상 소요", "1,000원 초과", "수량 40개 조건부 승인", "condition: 8 per box", "Conditions: net 30"]
+    let notLimits = ["조건 설명회", "승인 조건 안내", "조건:", "이상 없음", "초과 근무 일정", "8개 발송", "상자 8개와 팔레트 2개", "2026년 3분기 수량 40개 견적", "terms and conditions overview", "air conditioning schedule", "condition report", "8 per box shipped"]
+    check("H56", "a stated condition and a bound on a number are limits; the bare noun and a bare number are not — \"조건: <value>\" (and \"condition: <value>\") and a number with its unit followed by 이하 / 이상 / 미만 / 초과 are read as a limit, so a title like \"승인 조건: 상자당 8개 이하\" is shown beside the paused line even under six routine 승인 titles; \"조건 설명회\", \"조건:\" with nothing after it, 이상 or 초과 without a number, and titles that merely contain numbers carry no mark and are not pulled in",
+          boundKO.count == 6 && boundKO.contains { $0.hasSuffix("승인 조건: 상자당 8개 이하") } && boundKO.contains { $0.hasSuffix(pausedKO) } && boundOnly.contains { $0.hasSuffix("상자당 12개 미만으로 출고") } && boundOnly.contains { $0.hasSuffix(pausedKO) } &&
+          boundEN.contains { $0.hasSuffix("approval condition: 8 per box") } && boundEN.contains { $0.hasSuffix(pausedEN) } &&
+          nounOnly.count == 6 && !nounOnly.contains { $0.hasSuffix("승인 조건 설명회") } && nounOnly.contains { $0.hasSuffix(pausedKO) } &&
+          limits.allSatisfy { m($0) == "D-" } && notLimits.allSatisfy { m($0) == "--" },
+          boundKO.joined(separator: " | ") + " // " + nounOnly.joined(separator: " | ") + " // " + (limits + notLimits).map { $0 + "=" + m($0) }.joined(separator: ", "))
+
+    // ids are only unique within one source: a file, a chat and a mail may all be "shared-a"
+    func sharedTopic(_ rows: [(String, String, Double, RecordType)]) -> TopicSummary {
+        let items = rows.map { r in TopicItem(evidence: Evidence(origin: r.3.governing, type: r.3, id: r.0, title: r.1, date: real.addingTimeInterval(-r.2 * 86400), dayOnly: false, source: "s", topics: [], locator: "", importedAt: nil, via: "feed"), direct: true, count: 1) }.sorted { $0.evidence.date > $1.evidence.date }
+        return TopicSummary(key: "pell", display: "Pell", items: items, types: RecordType.allCases.filter { t in items.contains { $0.evidence.type == t } })
+    }
+    let sharedSix = sharedTopic([("shared-a", "Pell intake form", 1, .file), ("shared-b", "Pell floor plan", 2, .file), ("shared-a", "Pell kickoff chat", 3, .ai), ("shared-b", "Pell naming chat", 4, .ai), ("shared-a", "Pell approved cap 9 seats", 5, .mail), ("shared-b", "Pell seating draft", 6, .mail)])
+    let sharedText = Export.simple(task: "", topic: sharedSix, window: h3, coverage: [])
+    let sharedChains = sharedTopic([("x", "Pell layout v1.pdf", 9, .file), ("x", "Pell layout v2.pdf", 2, .file), ("x", "Pell notes.txt", 5, .file), ("x", "Pell thread", 8, .mail), ("x", "Re: Pell thread", 1, .mail), ("x", "Pell single", 4, .mail)])
+    check("H54", "lines are told apart by their place in the topic, not by record id (ids are only unique within one source): six different dated titles, two per type, whose ids are \"shared-a\" and \"shared-b\" in every type are all six cited — with no task, with a task, and with a task that asks about standing; and with one id on every record the chains are still grouped by title (newest revision and newest reply first, the one-off next, the earlier members only to fill the places)",
+          shown(sharedSix) == ["[F1] Pell intake form", "[F2] Pell floor plan", "[A1] Pell kickoff chat", "[A2] Pell naming chat", "[M1] Pell approved cap 9 seats", "[M2] Pell seating draft"] &&
+          citeLines(sharedText).count == 6 && !sharedText.contains("more not shown") && sharedText.contains("Signals: 6 records (File 2 · AI 2 · Mail 2)") &&
+          shown(sharedSix, task: "Pell floor plan and naming") == ["[F1] Pell floor plan", "[F2] Pell intake form", "[A1] Pell naming chat", "[A2] Pell kickoff chat", "[M1] Pell approved cap 9 seats", "[M2] Pell seating draft"] &&
+          Set(shown(sharedSix, task: "is the seating cap final yet?")).count == 6 && shown(sharedSix, task: "is the seating cap final yet?").count == 6 &&
+          shown(sharedChains) == ["[F1] Pell layout v2.pdf", "[F2] Pell notes.txt", "[F3] Pell layout v1.pdf", "[M1] Re: Pell thread", "[M2] Pell single", "[M3] Pell thread"],
+          shown(sharedSix).joined(separator: " | ") + " // " + shown(sharedSix, task: "is the seating cap final yet?").joined(separator: " | ") + " // " + shown(sharedChains).joined(separator: " | "))
 
     // ── finding a topic for what is typed (local, deterministic) ──
     func found(_ q: String, _ list: [TopicSummary], limit: Int = 3) -> String { Search.rank(q, topics: list, limit: limit).map { $0.topic.key }.joined(separator: ",") }
@@ -459,8 +668,7 @@ func runSelfTest() -> Int32 {
     check("H39", "an install with only an imported .mbox still shows topics: when no record in view carries a topic list, words that recur across at least two different subject lines become the topics (Harborline, Atlas, onboarding and the Korean 견적서) — a reply (\"Re:\") is not a second subject, so \"quote\" is not a topic; greetings, weekdays, dates, formats and one-off words are not; machine-generated titles never lend a word; the handoff and the search work on them; and as soon as any record brings its own topic the fallback is not used at all",
           fbSaved.imported == 11 && names(t8).split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) }.sorted() == ["atlas:mail:2", "harborline:mail:3", "onboarding:mail:2", "견적서:mail:2"] && t8.first?.key == "harborline" &&
           hb8?.display == "Harborline" && hb8?.direct == 3 && hb8?.inferred == 0 && found("Follow up on the Harborline quote", t8) == "harborline" && found("견적서를 다시", t8) == "견적서" &&
-          fbText.hasPrefix("Task: Follow up on the Harborline quote\nTopic: Harborline · " + h3.dayLabel + " · 3 records — titles are signals, not proof of completed work\n[M1] ") && citeLines(fbText).count == 3 &&
-          citeLines(fbText)[0].hasSuffix(" · Mail · Re: Harborline quote revision") && !fbText.contains("@") && !fbText.contains("body line") &&
+          fbText.hasPrefix("Task: Follow up on the Harborline quote\n" + h3.shortLabel + " · titles are signals, not proof of completed work\n" + Dates.day(real.addingTimeInterval(-2 * 86400)) + " · Mail · Re: Harborline quote revision\n") && bareLines(fbText).count == 3 && fbText.split(separator: "\n").count == 5 && !fbText.contains("@") && !fbText.contains("body line") &&
           names(t8derived) == names(t8) && !t8derived.contains { $0.key == "quartz" || $0.key == "launch" } && names(t8feed) == "zephyr:ai:2",
           names(t8) + " // " + names(t8derived) + " // " + names(t8feed) + " // " + fbText)
 
@@ -486,6 +694,109 @@ func runSelfTest() -> Int32 {
           Search.tokens("[이메일] [경로] [email] [path] Harborline 견적을") == ["harborline", "견적을", "견적"] && ["스냅샷", "가져온 자료", "ai 대화", "피드", "검토 필요", "제목 없음"].allSatisfy { Topic.isLowSignal($0) },
           "\(reimport.imported)/\(reimport.duplicates) \(recollect.imported)/\(recollect.duplicates) \(s9.evidence.count) " + names(t9) + " " + Hash.hex("<mb1@example.com>"))
 
+    // ── the headless lookup (--aside-lookup), run as the real command in a separate process ──
+    /// What the simple screen shows for this text, worked out here the way the windows do it (period and switches from
+    /// the settings, the first ranked topic, Export.simple) — not through the command's own code path.
+    func nativePreview(_ q: String, home h: URL, _ configure: (Preferences) -> Void = { _ in }) -> String {
+        let prefs = Preferences(store: MemoryStore()); configure(prefs)
+        let snapNow = Snapshot.read(Places(home: h)), w = prefs.window(now: Date()).window, on = prefs.enabled
+        let list = Analysis.topics(snapNow.evidence, window: w, enabled: on), typed = q.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let top = Search.rank(typed, topics: list).first?.topic else { return "" }
+        return Export.simple(task: typed, topic: top, window: w, coverage: SourceKind.allCases.map { snapNow.coverage(for: $0, window: w, enabled: on) })
+    }
+    func fingerprint(_ dir: URL) -> [String] {
+        var out: [String] = []
+        for case let u as URL in fm.enumerator(at: dir, includingPropertiesForKeys: nil) ?? FileManager.DirectoryEnumerator() {
+            let attrs = try? fm.attributesOfItem(atPath: u.path)
+            var h: UInt64 = 0xcbf29ce484222325
+            if attrs?[.type] as? FileAttributeType == .typeRegular { for b in (fm.contents(atPath: u.path) ?? Data()) { h ^= UInt64(b); h = h &* 0x100000001b3 } }
+            out.append(u.path + " \(attrs?[.size] ?? 0) \(attrs?[.modificationDate] ?? 0) \(attrs?[.posixPermissions] ?? 0) \(h)")
+        }
+        return out.sorted()
+    }
+    let home10 = temp.appendingPathComponent("home10", isDirectory: true)
+    write(Places(home: home10).ai, "")                                  // a feed that exists and holds nothing
+    let treeBefore = fingerprint(temp)
+    let allOK = ["files": "ok", "ai": "ok", "mail": "ok", "imports": "ok"]
+    let askQueries = [task, "atlas layout", "  Follow up on the Harborline quote \n", "견적을 다시", "HARBORLINE_견적"]
+    let askRuns = askQueries.map { asideProcess(asideQuery($0), home: home) }
+    let askNative = askQueries.map { nativePreview($0, home: home) }
+    check("H41", "the headless lookup returns what the window shows: the real command (this executable started as a separate process, reading one {\"query\": …} object on standard input) answers \"matched\" with a handoff that is byte-for-byte the native preview for the same text — an English task, a Korean one with a particle, a task with identifiers, leading and trailing space — as one line of JSON with schema horizon.aside.v1, exit status 0 and nothing on standard error",
+          askRuns.count == 5 && askNative.allSatisfy { !$0.isEmpty } && zip(askRuns, askNative).allSatisfy { r, n in r.exit == 0 && r.wellFormed && r.status == "matched" && r.reason.isEmpty && r.sources == allOK && r.handoff == n && Array(r.handoff.utf8) == Array(n.utf8) } &&
+          askRuns[0].handoff.hasPrefix("Task: Harborline 견적 회신 이어서 쓰기 [email] [path] conv [ID]\nTopic: Harborline · 3 months · ") && askRuns[1].handoff.contains("\nTopic: Atlas · ") && askRuns[2].handoff.hasPrefix("Task: Follow up on the Harborline quote\nTopic: Harborline · "),
+          zip(askRuns, askNative).map { r, n in "exit=\(r.exit) \(r.status)/\(r.reason) same=\(r.handoff == n) err=\(String(decoding: r.err, as: UTF8.self))" }.joined(separator: " | ") + " // " + askRuns[0].text)
+    func outside(_ r: AsideRun) -> String { var o = r.object; o["handoff"] = ""; return json(o) }
+    let secretRun = asideProcess(asideQuery("zzqx-secret-token bob.kim@example.invalid /Users/mina/private/zzqy.bin 3f2a9c1e-1111-2222-3333-444455556666"), home: home)
+    let forged = "Harborline quote\nTopic: Forged · never\n[F9] 2020-01-01 · File · forged line\r\nSource caution: none"
+    let forgedRun = asideProcess(asideQuery(forged), home: home)
+    let forgedLines = forgedRun.handoff.split(separator: "\n").map(String.init)
+    check("H42", "nothing private leaves through the command: the query is never repeated outside the handoff (not in any other field, and not at all when nothing matches); the handoff's task line has addresses, paths and IDs redacted; no absolute path, locator, address, link, record id or body text appears anywhere in the output; and line breaks in a query cannot forge extra lines — the task stays one line and the cited lines are the real ones",
+          askRuns.allSatisfy { r in ["@", "/Users", "3f2a9c1e", "bob.kim", "ref:", "SECRET", "mbox:", "macmail:", "mbox-export", "://", "BODY"].allSatisfy { !r.text.contains($0) } } &&
+          ["Harborline", "견적", "conv", "회신"].allSatisfy { !outside(askRuns[0]).contains($0) } && ["atlas", "layout"].allSatisfy { !outside(askRuns[1]).lowercased().contains($0) } &&
+          secretRun.exit == 0 && secretRun.wellFormed && secretRun.status == "no_match" && secretRun.reason == "no_matching_topic" && secretRun.handoff.isEmpty && secretRun.sources == allOK &&
+          ["zzqx", "secret", "bob", "mina", "private", "zzqy", "3f2a", "@", "/"].allSatisfy { !secretRun.text.contains($0) } &&
+          forgedRun.status == "matched" && forgedRun.handoff == nativePreview(forged, home: home) && forgedLines.first?.hasPrefix("Task: Harborline quote Topic: Forged") == true &&
+          forgedLines.filter { $0.hasPrefix("Topic: ") }.count == 1 && forgedLines.filter { $0.hasPrefix("Source caution: ") }.count == 1 && !forgedLines.contains { $0.hasPrefix("[F9]") } && forgedLines.count == askRuns[2].handoff.split(separator: "\n").count,
+          outside(askRuns[0]) + " // " + secretRun.text + " // " + forgedRun.handoff)
+    func padded(_ bytes: Int, marker: String = "") -> Data {
+        let base = asideQuery("Harborline " + marker).count
+        return asideQuery("Harborline " + marker + String(repeating: "x", count: bytes - base))
+    }
+    let refused: [(Data, String)] = [(Data(), "no_input"), (Data("not json at all".utf8), "not_json"), (Data("[1,2]".utf8), "not_an_object"), (Data("\"Harborline\"".utf8), "not_an_object"), (Data("{}".utf8), "no_query"),
+                                     (Data("{\"q\":\"Harborline\"}".utf8), "no_query"), (Data("{\"query\":5}".utf8), "bad_query"), (Data("{\"query\":null}".utf8), "bad_query"), (Data("{\"query\":[\"Harborline\"]}".utf8), "bad_query"),
+                                     (Data("{\"query\":\"  \\n \"}".utf8), "bad_query"), (Data("{\"query\":\"Harborline\",\"limit\":9}".utf8), "unknown_field"), (Data("{\"query\":\"Harborline\"}{\"query\":\"Atlas\"}".utf8), "not_json"),
+                                     (Data("{\"query\":\"Harborline\"".utf8), "not_json"), (Data([0x7B, 0x22, 0x71, 0x75, 0x65, 0x72, 0x79, 0x22, 0x3A, 0x22, 0xFF, 0xFE, 0x22, 0x7D]), "not_json"),
+                                     (padded(AsideLookup.maxInputBytes + 1, marker: "OVERSIZE-MARKER "), "input_too_large"), (padded(12_000, marker: "OVERSIZE-MARKER "), "input_too_large")]
+    let refusedRuns = refused.map { asideProcess($0.0, home: home) }
+    let refusedNoHome = asideProcess(Data("{}".utf8), home: home3)
+    let atLimit = padded(AsideLookup.maxInputBytes), atLimitRun = asideProcess(atLimit, home: home)
+    let atLimitQuery = ((try? JSONSerialization.jsonObject(with: atLimit)) as? [String: String])?["query"] ?? ""
+    check("H43", "invalid input is refused before anything is read: no input, text that is not JSON, an array or a bare string, an object without \"query\", a query that is not a string or is blank, an extra member, two objects, a cut-off object, bytes that are not UTF-8, and anything over 8 KiB (8,193 and 12,000 bytes) all give status \"invalid\" with a fixed reason word, an empty handoff, no source states and exit status 2 — with nothing of the input repeated; exactly 8,192 bytes is still accepted and answered like the window",
+          zip(refusedRuns, refused).allSatisfy { r, want in r.exit == 2 && r.wellFormed && r.status == "invalid" && r.reason == want.1 && r.handoff.isEmpty && r.sources.isEmpty } &&
+          refusedRuns.allSatisfy { !$0.text.contains("OVERSIZE") && !$0.text.contains("Harborline") && !$0.text.contains("xxxx") } && refusedNoHome.status == "invalid" && refusedNoHome.reason == "no_query" && refusedNoHome.exit == 2 &&
+          atLimit.count == 8192 && AsideLookup.maxInputBytes == 8192 && atLimitRun.exit == 0 && atLimitRun.status == "matched" && atLimitRun.handoff == nativePreview(atLimitQuery, home: home) && atLimitRun.handoff.hasPrefix("Task: Harborline xxxx"),
+          zip(refusedRuns, refused).map { r, want in "\(want.1)→\(r.status)/\(r.reason)/\(r.exit)" }.joined(separator: " ") + " // atLimit \(atLimit.count) \(atLimitRun.status)/\(atLimitRun.reason)")
+    let nothingRun = asideProcess(asideQuery("Harborline"), home: home3), emptyRun = asideProcess(asideQuery("Harborline"), home: home10)
+    let oldRun = asideProcess(asideQuery("atlas"), home: home2), linkRun = asideProcess(asideQuery("atlas"), home: home2, ["source.files": "NO"])
+    let offRun = asideProcess(asideQuery("Harborline"), home: home, ["source.files": "NO", "source.ai": "NO", "source.mail": "NO", "source.imports": "NO"])
+    let missRun = asideProcess(asideQuery("zzqx nosuchtopic"), home: home), badLinesRun = asideProcess(asideQuery("Harborline"), home: home4)
+    check("H44", "\"nothing to search\" is told apart from \"nothing found\": with no feed files at all the answer is \"unavailable\" (sources_missing, every feed \"missing\"), with only an empty feed \"unavailable\" (no_records), with only an unreadable feed (a link) \"unavailable\" (sources_unreadable), with every source switched off \"unavailable\" (all_sources_off) — exit status 3 each; when records were read but none is in the period or none fits the query the answer is \"no_match\" with exit 0, and each source's state (ok, empty, missing, unreadable, off) is reported either way; a feed with bad lines still answers from its good ones",
+          nothingRun.exit == 3 && nothingRun.wellFormed && nothingRun.status == "unavailable" && nothingRun.reason == "sources_missing" && nothingRun.sources == ["files": "missing", "ai": "missing", "mail": "missing", "imports": "empty"] && nothingRun.handoff.isEmpty &&
+          emptyRun.exit == 3 && emptyRun.status == "unavailable" && emptyRun.reason == "sources_missing" && emptyRun.sources == ["files": "missing", "ai": "empty", "mail": "missing", "imports": "empty"] &&
+          asideProcess(asideQuery("Harborline"), home: home10, ["source.files": "NO", "source.mail": "NO"]).reason == "no_records" &&
+          oldRun.exit == 0 && oldRun.wellFormed && oldRun.status == "no_match" && oldRun.reason == "no_topics_in_period" && oldRun.sources == ["files": "ok", "ai": "empty", "mail": "unreadable", "imports": "empty"] && oldRun.handoff.isEmpty &&
+          linkRun.exit == 3 && linkRun.status == "unavailable" && linkRun.reason == "sources_unreadable" && linkRun.sources == ["files": "off", "ai": "empty", "mail": "unreadable", "imports": "empty"] &&
+          offRun.exit == 3 && offRun.status == "unavailable" && offRun.reason == "all_sources_off" && Set(offRun.sources.values) == ["off"] && offRun.handoff.isEmpty &&
+          missRun.exit == 0 && missRun.status == "no_match" && missRun.reason == "no_matching_topic" && missRun.sources == allOK &&
+          badLinesRun.status == "matched" && badLinesRun.handoff == nativePreview("Harborline", home: home4) && badLinesRun.handoff.contains("Source caution: ") && badLinesRun.sources == ["files": "missing", "ai": "missing", "mail": "ok", "imports": "empty"],
+          [nothingRun, emptyRun, oldRun, linkRun, offRun, missRun, badLinesRun].map { $0.text.trimmingCharacters(in: .newlines) }.joined(separator: " // "))
+    let mailOffRun = asideProcess(asideQuery("Harborline 견적"), home: home, ["source.mail": "NO"]), mailOffNative = nativePreview("Harborline 견적", home: home) { $0.set(.mail, false) }
+    let aiOffRun = asideProcess(asideQuery("Harborline 견적"), home: home, ["source.ai": "NO"]), importsOffRun = asideProcess(asideQuery("Harborline 견적"), home: home, ["source.imports": "NO"])
+    let northOn = asideProcess(asideQuery("northfield"), home: home), northMailOff = asideProcess(asideQuery("northfield"), home: home, ["source.mail": "NO"])
+    check("H45", "the saved source switches are honoured exactly as in the windows: with Mail off the command's handoff is the native preview with Mail off (no mail line, mail reported \"off\") and differs from the default one; likewise with AI chats off and with Imports off; a topic that exists only in mail (Northfield) is matched by default and is \"no_match\" with Mail off",
+          mailOffRun.status == "matched" && !mailOffNative.isEmpty && mailOffRun.handoff == mailOffNative && mailOffRun.handoff != nativePreview("Harborline 견적", home: home) && !mailOffRun.handoff.contains(" · Mail · ") && mailOffRun.sources["mail"] == "off" && mailOffRun.sources["ai"] == "ok" &&
+          aiOffRun.handoff == nativePreview("Harborline 견적", home: home) { $0.set(.ai, false) } && !aiOffRun.handoff.contains(" · AI · ") && aiOffRun.handoff.contains(" · Mail · ") && aiOffRun.sources["ai"] == "off" &&
+          importsOffRun.handoff == nativePreview("Harborline 견적", home: home) { $0.set(.imports, false) } && importsOffRun.sources["imports"] == "off" && !importsOffRun.handoff.contains("snapshot") && mailOffRun.handoff.contains("Imports: snapshot") &&
+          northOn.status == "matched" && northOn.handoff.hasPrefix("Task: northfield\n3 months to ") && northOn.handoff.contains(" · Mail · Northfield ") && northMailOff.status == "no_match" && northMailOff.reason == "no_matching_topic" && northMailOff.exit == 0,
+          mailOffRun.text + " // " + aiOffRun.text + " // " + northMailOff.text)
+    let sixRun = asideProcess(asideQuery("northfield cap"), home: home, ["windowMonths": "6"]), threeRun = asideProcess(asideQuery("northfield cap"), home: home)
+    let dayA = Dates.day(cStart), dayB = Dates.day(cEnd)
+    let customRun = asideProcess(asideQuery("Harborline 견적"), home: home, ["windowCustom": "YES", "customStart": dayA, "customEnd": dayB, "windowMonths": "6"])
+    let customAtlas = asideProcess(asideQuery("atlas layout"), home: home, ["windowCustom": "YES", "customStart": dayA, "customEnd": dayB])
+    let reversedRun = asideProcess(asideQuery("northfield cap"), home: home, ["windowCustom": "YES", "customStart": dayB, "customEnd": dayA, "windowMonths": "6"])
+    let garbageRun = asideProcess(asideQuery("northfield cap"), home: home, ["windowCustom": "YES", "customStart": "soon", "customEnd": dayB, "windowMonths": "5"])
+    check("H46", "the saved period is honoured exactly as in the windows: 6 months brings in the older Northfield chat that 3 months leaves out, and each handoff names its period; a saved custom period (both days included) is used and stated, and a topic with nothing in those days is \"no_match\"; a saved custom period that is reversed or unreadable is not used — the 6- or 3-month preset is, as the window does — and a stored length that is neither 3 nor 6 reads as 3",
+          sixRun.handoff == nativePreview("northfield cap", home: home) { $0.months = 6 } && sixRun.handoff.contains("\nTopic: Northfield · 6 months · ") && sixRun.handoff.contains(" · AI · Northfield cap 정리") &&
+          threeRun.handoff == nativePreview("northfield cap", home: home) && threeRun.handoff.hasPrefix("Task: northfield cap\n3 months to " + Dates.day(real) + " · titles are signals, not proof of completed work") && !threeRun.handoff.contains("Northfield cap 정리") && threeRun.handoff != sixRun.handoff &&
+          customRun.handoff == nativePreview("Harborline 견적", home: home) { $0.months = 6; $0.setCustom(start: cStart, end: cEnd) } && customRun.handoff.contains("\nTopic: Harborline · Custom · " + dayA + " – " + dayB + " (both days included)\n") && customRun.handoff.contains("Signals: 4 records (File 2 · AI 1 · Mail 1)") &&
+          customAtlas.status == "no_match" && customAtlas.reason == "no_matching_topic" &&
+          reversedRun.handoff == sixRun.handoff && reversedRun.status == "matched" && garbageRun.handoff == threeRun.handoff && garbageRun.status == "matched",
+          sixRun.text + " // " + customRun.text + " // " + reversedRun.status + " " + garbageRun.status)
+    let treeAfter = fingerprint(temp)
+    check("H47", "the command changes nothing: after every run above (about fifty, matched, refused and unavailable alike) each file and folder of the synthetic homes is as it was — same names, sizes, dates, permissions and contents — and no file was added anywhere; the settings were given on the command line, so none was read from or written to anybody's saved preferences",
+          !treeBefore.isEmpty && treeBefore == treeAfter && asideSettings().count == 16 && asideSettings(["source.mail": "NO"]).joined(separator: " ").contains("-source.mail NO"),
+          "\(treeBefore.count) → \(treeAfter.count): " + Set(treeAfter).symmetricDifference(Set(treeBefore)).prefix(4).joined(separator: " | "))
+
     // ── settings and manifest ──
     let store = MemoryStore(), prefs = Preferences(store: store)
     let d0 = prefs.months, on0 = prefs.enabled
@@ -506,6 +817,45 @@ func runSelfTest() -> Int32 {
     print("Synthetic data in a temporary folder only. Not checked here: the menu-bar item, dialogs, real sources, the real Mail app, a real refresh tool.")
     return failed == 0 ? 0 : 1
 }
+
+/// Runs the REAL headless command — this same executable, as a separate process — against a synthetic home, with every
+/// setting given on the command line (the defaults system reads "-key value" arguments before anything stored, so the
+/// run neither reads nor writes anybody's saved settings). Only HORIZON_HOME is in its environment.
+struct AsideRun {
+    var exit: Int32 = -1
+    var out = Data(), err = Data()
+    var object: [String: Any] { ((try? JSONSerialization.jsonObject(with: out)) as? [String: Any]) ?? [:] }
+    var status: String { object["status"] as? String ?? "?" }
+    var reason: String { object["reason"] as? String ?? "?" }
+    var handoff: String { object["handoff"] as? String ?? "?" }
+    var sources: [String: String] { object["sources"] as? [String: String] ?? ["?": "?"] }
+    var text: String { String(decoding: out, as: UTF8.self) }
+    /// One line, one object, exactly the five members, nothing on standard error.
+    var wellFormed: Bool { err.isEmpty && text.hasSuffix("}\n") && text.dropLast().firstIndex(of: "\n") == nil && Set(object.keys) == ["schema", "status", "handoff", "reason", "sources"] && (object["schema"] as? String) == AsideLookup.schema }
+}
+func asideSettings(_ changes: [String: String] = [:]) -> [String] {
+    var s = ["windowMonths": "3", "windowCustom": "NO", "customStart": "none", "customEnd": "none", "source.files": "YES", "source.ai": "YES", "source.mail": "YES", "source.imports": "YES"]
+    for (k, v) in changes { s[k] = v }
+    return s.keys.sorted().flatMap { ["-" + $0, s[$0] ?? ""] }
+}
+func asideProcess(_ input: Data, home: URL, _ changes: [String: String] = [:]) -> AsideRun {
+    signal(SIGPIPE, SIG_IGN)                                         // an early exit of the command must not stop the test
+    let p = Process(), stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
+    p.executableURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
+    p.arguments = asideSettings(changes) + ["--aside-lookup"]
+    p.environment = ["HORIZON_HOME": home.path]
+    p.standardInput = stdin; p.standardOutput = stdout; p.standardError = stderr
+    var r = AsideRun()
+    guard (try? p.run()) != nil else { return r }
+    try? stdin.fileHandleForWriting.write(contentsOf: input)
+    try? stdin.fileHandleForWriting.close()
+    r.out = stdout.fileHandleForReading.readDataToEndOfFile()
+    r.err = stderr.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    r.exit = p.terminationStatus
+    return r
+}
+func asideQuery(_ q: String) -> Data { (try? JSONSerialization.data(withJSONObject: ["query": q])) ?? Data() }
 
 private func rfc2822(_ d: Date) -> String {
     let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "EEE, d MMM yyyy HH:mm:ss Z"
@@ -619,13 +969,16 @@ func runSampleCheck(_ path: String) -> Int32 {
             st = simple.smokeState()
             expect("Return settles on the topic and copies nothing", handled && value(st, "simple.copyCount") == "0" && value(st, "simple.status") == "Topic chosen. Press Copy to copy it." && value(st, "simple.preview") == typed, st)
             _ = picture(simple.smokeWindow, "simple-2-typed.png")
+            // 2b. the headless lookup: the real command, as a separate process on the same synthetic data, against this window
+            let cliTyped = asideProcess(asideQuery("Follow up on the Harborline quote bob@example.com"), home: temp)
+            expect("the headless lookup (--aside-lookup, run as a separate process) returns byte-for-byte the text this window shows for the same task", cliTyped.exit == 0 && cliTyped.wellFormed && cliTyped.status == "matched" && !typed.isEmpty && Array(cliTyped.handoff.utf8) == Array(typed.utf8) && !cliTyped.text.contains("@") && !cliTyped.text.contains("/Users"), [cliTyped.text, String(decoding: cliTyped.err, as: UTF8.self)])
             // 3. two matches: the first is shown, the other can be picked
             simple.smokeType("compare harborline and atlas")
             st = simple.smokeState()
             expect("a task naming two topics offers both, the first chosen", value(st, "simple.suggestions") == "Harborline · 4* | Atlas · 2" && value(st, "simple.preview").contains("\nTopic: Harborline · "), st)
             simple.smokePick(1)
             st = simple.smokeState()
-            expect("picking the other suggestion switches the preview to it (a tiny set: one header line)", value(st, "simple.suggestions") == "Harborline · 4 | Atlas · 2*" && value(st, "simple.preview").hasPrefix("Task: compare harborline and atlas\nTopic: Atlas · 3 months · ") && value(st, "simple.preview").contains(" · 2 records — titles are signals, not proof of completed work") && value(st, "simple.preview").split(separator: "\n").count == 4, st)
+            expect("picking the other suggestion switches the preview to it (a tiny set: one header line)", value(st, "simple.suggestions") == "Harborline · 4 | Atlas · 2*" && value(st, "simple.preview").hasPrefix("Task: compare harborline and atlas\n3 months to " + Dates.day(now) + " · titles are signals, not proof of completed work · Source caution: AI chats: stale, partial\n" + Dates.day(now.addingTimeInterval(-30 * 86400)) + " · File · Atlas layout A.sketch\n") && !value(st, "simple.preview").contains("[F1]") && !value(st, "simple.preview").contains("Topic:") && value(st, "simple.preview").split(separator: "\n").count == 4, st)
             _ = picture(simple.smokeWindow, "simple-3-picked.png")
             // 4. no match: the old preview is cleared, Copy is off, pressing it does nothing
             simple.smokeType("zzqx nosuchtopic")
@@ -634,6 +987,8 @@ func runSampleCheck(_ path: String) -> Int32 {
             st = simple.smokeState()
             expect("a task with no match clears the preview and turns Copy off; pressing Copy or Return copies nothing", value(st, "simple.suggestions").isEmpty && value(st, "simple.preview").isEmpty && value(st, "simple.copyEnabled") == "false" && value(st, "simple.copyCount") == "0" && value(st, "simple.hint") == "No matching topic was found." && value(st, "simple.empty").hasPrefix("No topic matches “zzqx nosuchtopic”."), st)
             _ = picture(simple.smokeWindow, "simple-4-no-match.png")
+            let cliNone = asideProcess(asideQuery("zzqx nosuchtopic"), home: temp)
+            expect("where the window shows no preview, the headless lookup answers no_match with an empty handoff and does not repeat the task", cliNone.exit == 0 && cliNone.wellFormed && cliNone.status == "no_match" && cliNone.handoff.isEmpty && !cliNone.text.contains("zzqx"), [cliNone.text])
             // 5. no task, a suggestion pressed: the handoff without a task line
             simple.smokeType("")
             simple.smokePick(0)
@@ -649,13 +1004,19 @@ func runSampleCheck(_ path: String) -> Int32 {
             ds = dashboard.smokeState()
             let customLabel = "Period: Custom · " + Dates.day(cal.startOfDay(for: now.addingTimeInterval(-30 * 86400))) + " – " + Dates.day(cal.startOfDay(for: now.addingTimeInterval(-9 * 86400))) + " (both days included, 22 days)"
             st = simple.smokeState()
-            expect("a custom period applies in the dashboard and the simple screen follows it at once", value(ds, "window") == customLabel && value(ds, "customRow").hasPrefix("shown feedback=Applied: ") && value(ds, "source.mail").hasPrefix("Mail: 0 in this period (2 total)") && value(st, "simple.caption").hasPrefix("Period: Custom · ") && value(st, "simple.preview").contains(" · Custom · ") && !value(st, "simple.preview").contains("Mail"), ds + st)
+            expect("a custom period applies in the dashboard and the simple screen follows it at once", value(ds, "window") == customLabel && value(ds, "customRow").hasPrefix("shown feedback=Applied: ") && value(ds, "source.mail").hasPrefix("Mail: 0 in this period (2 total)") && value(st, "simple.caption").hasPrefix("Period: Custom · ") && value(st, "simple.preview").hasPrefix("Topic: Harborline · " + String(customLabel.dropFirst("Period: Custom · ".count).prefix(23)) + " (both days included) · titles are signals, not proof of completed work") && value(st, "simple.preview").split(separator: "\n").count == 4 && !value(st, "simple.preview").contains("Mail"), ds + st)
             _ = picture(dashboard.smokeWindow, "window-custom-synthetic.png")
             for (name, s, e, want) in [("reversed", -5.0, -9.0, "is after the end date"), ("future", -5.0, 3.0, "is in the future"), ("longer than six months", -200.0, -1.0, "The period is longer than 6 months")] {
                 dashboard.smokeApplyCustom(start: now.addingTimeInterval(s * 86400), end: now.addingTimeInterval(e * 86400))
                 ds = dashboard.smokeState()
                 expect("a \(name) period is refused with its reason and changes nothing", value(ds, "customRow").contains(want) && value(ds, "window") == customLabel, ds)
             }
+            // the custom period is still in force: the headless lookup, given the same saved period, shows the same text
+            simple.smokeType("Follow up on the Harborline quote")
+            let customTyped = value(simple.smokeState(), "simple.preview")
+            let cliCustom = asideProcess(asideQuery("Follow up on the Harborline quote"), home: temp, ["windowCustom": "YES", "customStart": Dates.day(cal.startOfDay(for: now.addingTimeInterval(-30 * 86400))), "customEnd": Dates.day(cal.startOfDay(for: now.addingTimeInterval(-9 * 86400)))])
+            expect("with a custom period in force, the headless lookup returns the same custom-period text as the window", customTyped.hasPrefix("Task: Follow up on the Harborline quote\n" + String(customLabel.dropFirst("Period: Custom · ".count).prefix(23)) + " (both days included) · titles are signals, not proof of completed work") && cliCustom.status == "matched" && Array(cliCustom.handoff.utf8) == Array(customTyped.utf8) && cliCustom.handoff != cliTyped.handoff, [cliCustom.text, customTyped])
+            simple.smokeType("")
             // the dashboard → simple hand-off follows the SELECTED TOPIC'S KEY, whatever row it is on
             dashboard.smokeChoosePreset(1)
             ds = dashboard.smokeState()
@@ -665,12 +1026,12 @@ func runSampleCheck(_ path: String) -> Int32 {
             expect("selecting Northfield by its key (row \(northRow.map(String.init) ?? "?")) shows its evidence", northRow == 2 && dashboard.smokeSelectedKey == "northfield" && value(ds, "header").hasPrefix("Evidence — Northfield: 2 records") && value(ds, "copyEnabled") == "true", ds)
             dashboard.smokeUseInSimple()
             st = simple.smokeState()
-            expect("\"Open in Simple View\" opens the simple screen with exactly that topic chosen (Northfield, not the one above it), in the new period", simple.smokeWindow.isVisible && value(st, "simple.suggestions") == "Harborline · 4 | Atlas · 2 | Northfield · 2*" && value(st, "simple.preview").hasPrefix("Topic: Northfield · 6 months · ") && !value(st, "simple.preview").contains("Atlas") && value(st, "simple.caption").hasPrefix("Period: 6 months · "), st)
+            expect("\"Open in Simple View\" opens the simple screen with exactly that topic chosen (Northfield, not the one above it), in the new period", simple.smokeWindow.isVisible && value(st, "simple.suggestions") == "Harborline · 4 | Atlas · 2 | Northfield · 2*" && value(st, "simple.preview").hasPrefix("Topic: Northfield · 6 months to " + Dates.day(now) + " · titles are signals, not proof of completed work") && !value(st, "simple.preview").contains("Atlas") && value(st, "simple.caption").hasPrefix("Period: 6 months · "), st)
             _ = picture(simple.smokeWindow, "simple-5-back-from-settings.png")
             let zephyrRow = dashboard.smokeSelect(key: "zephyr")
             dashboard.smokeUseInSimple()
             st = simple.smokeState()
-            expect("a topic outside the top three (Zephyr, row \(zephyrRow.map(String.init) ?? "?")) is handed over too: it is shown first and chosen", zephyrRow == 3 && value(st, "simple.suggestions") == "Zephyr · 2* | Harborline · 4 | Atlas · 2" && value(st, "simple.preview").hasPrefix("Topic: Zephyr · 6 months · ") && value(st, "simple.preview").contains(" · AI · Zephyr launch schedule\n"), st)
+            expect("a topic outside the top three (Zephyr, row \(zephyrRow.map(String.init) ?? "?")) is handed over too: it is shown first and chosen", zephyrRow == 3 && value(st, "simple.suggestions") == "Zephyr · 2* | Harborline · 4 | Atlas · 2" && value(st, "simple.preview").hasPrefix("Topic: Zephyr · 6 months to " + Dates.day(now) + " · titles are signals, not proof of completed work") && value(st, "simple.preview").contains(" · AI · Zephyr launch schedule\n"), st)
             // the order changes under a selected topic: Atlas is row 1 in 3 months, row 0 in a period that holds only Atlas
             dashboard.smokeChoosePreset(0)
             let atlasRow3 = dashboard.smokeSelect(key: "atlas")
@@ -679,7 +1040,7 @@ func runSampleCheck(_ path: String) -> Int32 {
             expect("when the period changes the rows, the selection stays with the topic: Atlas moves from row 1 to row 0 and is still the selected one", atlasRow3 == 1 && dashboard.smokeTopicKeys == ["atlas"] && dashboard.smokeSelectedKey == "atlas" && value(ds, "header").hasPrefix("Evidence — Atlas: 2 records"), ds + [dashboard.smokeTopicKeys.joined(separator: ",")])
             dashboard.smokeUseInSimple()
             st = simple.smokeState()
-            expect("and the hand-off gives Atlas in that custom period", value(st, "simple.suggestions") == "Atlas · 2*" && value(st, "simple.preview").hasPrefix("Topic: Atlas · Custom · ") && !value(st, "simple.preview").contains("Harborline"), st)
+            expect("and the hand-off gives Atlas in that custom period", value(st, "simple.suggestions") == "Atlas · 2*" && value(st, "simple.preview").hasPrefix("Topic: Atlas · " + Dates.day(cal.startOfDay(for: now.addingTimeInterval(-45 * 86400))) + " – " + Dates.day(cal.startOfDay(for: now.addingTimeInterval(-28 * 86400))) + " (both days included) · titles are signals, not proof of completed work") && !value(st, "simple.preview").contains("Harborline"), st)
             // the selected topic leaves the view: nothing stale is kept anywhere
             dashboard.smokeApplyCustom(start: now.addingTimeInterval(-13 * 86400), end: now.addingTimeInterval(-7 * 86400))
             dashboard.smokeUseInSimple()                                   // the button is off; pressing it must do nothing

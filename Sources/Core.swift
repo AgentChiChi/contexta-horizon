@@ -220,6 +220,9 @@ struct HorizonWindow {
                  : "\(months) months · \(Dates.day(start, calendar)) – \(Dates.minute(end, calendar)) (up to now)"
     }
     var dayLabel: String { (isCustom ? "Custom" : "\(months) months") + " · \(Dates.day(start, calendar)) – \(Dates.day(endDay, calendar))" + (isCustom ? " (both days included)" : "") }
+    /// The same period in the fewest words that still fix it: a preset by its length and last day (the first day
+    /// follows from the two), a custom period by its two days.
+    var shortLabel: String { isCustom ? "\(Dates.day(start, calendar)) – \(Dates.day(endDay, calendar)) (both days included)" : "\(months) months to \(Dates.day(endDay, calendar))" }
 }
 
 /// Checking a custom period before it is used. Both days are included; the period may be a single day; it may not
@@ -686,14 +689,183 @@ enum Search {
 
 // MARK: - Handoff text (shown inline; copied only when the person presses Copy)
 
+/// Where something stands, as far as a title says it in so many words: a decision taken or a limit set ("approved",
+/// "cap", "conditional", and the Korean for approved, limit, conditional), or something still open or changed since
+/// ("pending", "paused", "not confirmed", "correction", and the Korean for on hold, corrected). These words only help
+/// choose which dated lines to show when the task asks about such things; nothing is concluded from them and no word
+/// is added to a line.
+/// Deliberately narrow. A noun that only names the subject — "approval", "decision", "policy", "condition" and their
+/// Korean equivalents — is not a mark: an approval agenda or a briefing on conditions says nothing about where the
+/// thing stands. A stated condition is one ("condition: <value>"), and so is a bound on a number (a number, its unit
+/// and the Korean for at most / at least / under / over); a number on its own is not. "review", "update" and "notes"
+/// mean nothing here either. "draft" and its like are weak marks: they rank below explicit ones.
+enum Standing {
+    static let decisionWords: Set<String> = ["decided", "approved", "agreed", "confirmed", "signed", "finalized", "finalised", "ratified", "exception", "exceptions", "waiver",
+        "cap", "capped", "limit", "limits", "maximum", "minimum", "ceiling", "threshold", "required", "mandatory", "must", "allowed", "permitted", "prohibited",
+        "constraint", "constraints", "conditional", "conditionally", "contingent"]
+    static let decisionPhrases = [#"\bsubject to\b"#, #"\bno more than\b"#, #"\bat most\b"#, #"\bonly if\b"#, #"\bnot (to )?exceed\b"#, #"\bconditions?\s*:\s*\S"#,
+        #"조건\s*:\s*\S"#, #"\d[\d,.]*\s*[^\s\d:;,()]{0,6}\s*(이하|이상|미만|초과)"#]        // a stated condition; a number, its unit and a comparator
+    static let decisionKorean = ["확정", "승인됨", "승인됐", "승인되", "승인 완료", "승인완료", "최종 승인", "결정됨", "결정됐", "결정되", "결정 사항", "합의됨", "합의됐", "합의 완료", "체결", "결재 완료",
+        "예외", "한도", "상한", "하한", "제한", "필수", "허용", "금지", "조건부"]
+    static let pendingWords: Set<String> = ["pending", "awaiting", "waiting", "paused", "suspended", "halted", "stalled", "frozen", "tbd", "tbc", "unconfirmed", "unsigned", "unapproved", "unresolved", "undecided",
+        "blocked", "postponed", "delayed", "deferred", "cancelled", "canceled", "withdrawn", "revoked", "reverted", "superseded", "supersedes", "replaces", "replaced", "reopened",
+        "correction", "corrections", "corrected", "corrects", "amended", "amendment", "erratum", "retracted", "revised", "changed"]
+    static let weakPendingWords: Set<String> = ["draft", "drafts", "proposed", "tentative", "provisional"]
+    /// Said before the single words are looked at, and taken out first, so "not confirmed" is not read as "confirmed".
+    static let pendingPhrases = [#"\b(not|never) (yet )?(been )?(confirmed|signed|approved|agreed|decided|finali[sz]ed|final|received|sent|paid|done|completed?)\b"#, #"\bno longer\b"#, #"\bon hold\b"#,
+        #"\b(under|in|for|awaiting) (legal |final |internal |client |further )?(review|approval|signature|sign off|inspection)\b"#, #"\bto be (confirmed|decided|determined|signed|approved|agreed)\b"#, #"\binstead of\b"#]
+    static let pendingKorean = ["미확정", "미승인", "미결", "미체결", "미서명", "미확인", "미정", "보류", "대기", "중단", "중지", "정지", "검토 중", "검토중", "재검토", "정정", "취소", "철회", "번복", "변경", "연기", "지연", "대체"]
+    static let weakPendingKorean = ["초안", "가안", "잠정", "임시"]
+    /// Words of a task that ask where something stands or what holds now (the subject nouns belong here).
+    static let askedWords: Set<String> = decisionWords.union(pendingWords).union(weakPendingWords).union(["decision", "decisions", "decide", "approval", "approve", "agree", "agreement", "confirm", "sign", "signature",
+        "final", "permit", "permission", "policy", "rule", "rules", "requirement", "requirements", "deadline", "condition", "conditions", "status", "state", "current", "currently",
+        "now", "still", "yet", "anymore", "latest", "newest", "valid", "establish", "established", "outstanding", "open", "change", "changes", "updated", "resolved", "settled", "hold"])
+    static let askedKorean = decisionKorean + pendingKorean + weakPendingKorean + ["승인", "결정", "합의", "결재", "정책", "규정", "기한", "마감", "조건", "서명", "상태", "현재", "지금", "아직", "최신", "최종", "유효", "바뀌", "바뀐"]
+
+    private static func words(_ text: String) -> Set<String> { Set(text.split(whereSeparator: { !($0.isLetter || $0.isNumber) }).map(String.init)) }
+
+    /// What a title says about standing, each as 0 (nothing), 1 (weakly) or 2 (in so many words). A machine-generated
+    /// title says nothing.
+    static func marks(_ e: Evidence) -> (decision: Int, pending: Int) { e.derivedTitle ? (0, 0) : marks(title: e.title) }
+    static func marks(title: String) -> (decision: Int, pending: Int) {
+        var t = Topic.key(title), pending = 0
+        for p in pendingPhrases where t.range(of: p, options: .regularExpression) != nil { pending = 2; t = t.replacingOccurrences(of: p, with: " ", options: .regularExpression) }
+        for k in pendingKorean where t.contains(k) { pending = 2; t = t.replacingOccurrences(of: k, with: " ") }
+        let w = words(t)
+        if !w.isDisjoint(with: pendingWords) { pending = 2 }
+        if pending == 0, !w.isDisjoint(with: weakPendingWords) || weakPendingKorean.contains(where: { t.contains($0) }) { pending = 1 }
+        let decided = !w.isDisjoint(with: decisionWords) || decisionKorean.contains { t.contains($0) } || decisionPhrases.contains { t.range(of: $0, options: .regularExpression) != nil }
+        return (decided ? 2 : 0, pending)
+    }
+    static func asked(_ task: String) -> Bool {
+        let t = Topic.key(task)
+        return !t.isEmpty && (!words(t).isDisjoint(with: askedWords) || askedKorean.contains { t.contains($0) } || (pendingPhrases + decisionPhrases).contains { t.range(of: $0, options: .regularExpression) != nil })
+    }
+}
+
 enum Export {
     static let maxCitations = 6
     static let tiny = 3
 
-    /// Which lines are cited: about two per record type that has any, then the rest of the six from whatever is
-    /// left. Within a type: titles that share more words with the task first (the topic's own name does not count,
-    /// since every title has it), then direct mentions, then newest.
-    static func citations(_ topic: TopicSummary, prefer: [String] = []) -> [(label: String, item: TopicItem)] {
+    /// A title without the marks that only say "this again": reply and forward prefixes, numbered revision marks
+    /// ("/ revision 12", "v3", "draft 2", and the Korean revision marks), and copy counters ("(2)", "copy.pdf"). Titles with the same
+    /// stem are one chain: the same message answered, the same document saved again. A bare number is not such a
+    /// mark ("Phase 2" and "Phase 3", "Q3" and "Q4", a second and a third meeting stay different), and a title that is nothing but a mark keeps itself.
+    static func stem(_ title: String) -> String {
+        var t = Topic.key(title)
+        let rules = [#"^\s*((re|fw|fwd|aw|답장|회신|전달)\s*(\[\d+\])?\s*[:：]\s*)+"#,
+                     #"[\s/\-–—_·|,(\[]*\b(revision|rev|version|ver|draft)\.?\s*#?\d+(\.\d+)*\b[)\]]*"#,
+                     #"[\s/\-–—_·|,(\[]*\bv\.?\d+(\.\d+)*\b[)\]]*"#,
+                     #"[\s/\-–—_·|,(\[]*(수정|개정|버전|초안)\s*\d+\s*(차|판|본)?[)\]]*"#,
+                     #"[\s/\-–—_·|,(\[]*\d+\s*차\s*(수정본|개정본|수정|개정)[)\]]*"#,
+                     #"\s*\(\d+\)(?=(\.[a-z0-9]{1,5})?$)"#,
+                     #"\s*\((copy|사본|복사본)(\s*\d+)?\)(?=(\.[a-z0-9]{1,5})?$)"#,
+                     #"\s(copy|사본|복사본)(\s*\d+)?(?=\.[a-z0-9]{1,5}$)"#]
+        for r in rules { t = t.replacingOccurrences(of: r, with: " ", options: .regularExpression) }
+        t = t.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).replacingOccurrences(of: #"^[\s/\-–—_·|,:;]+|[\s/\-–—_·|,:;]+$|[\s/\-–—_·|,]+(?=\.[a-z0-9]{1,5}$)"#, with: "", options: .regularExpression)
+        return t.isEmpty ? Topic.key(title) : t
+    }
+
+    /// A query word in a title, allowing the plural or singular of an English word ("carton" finds "cartons").
+    static func mentions(_ title: String, word w: String) -> Bool {
+        if Topic.named(in: title, key: w) { return true }
+        guard w.count >= 4, w.unicodeScalars.allSatisfy({ $0.isASCII }) else { return false }
+        var forms = [w + "s", w + "es"]
+        if w.hasSuffix("ies") { forms.append(String(w.dropLast(3)) + "y") } else if w.hasSuffix("es") { forms.append(String(w.dropLast(2))) }
+        if w.hasSuffix("s") { forms.append(String(w.dropLast())) }
+        if w.hasSuffix("y") { forms.append(String(w.dropLast()) + "ies") }
+        return forms.contains { $0.count >= 3 && Topic.named(in: title, key: $0) }
+    }
+
+    /// Which lines are cited — at most six, each a different thing where the topic has that many:
+    ///  • titles that are the same again (a reply, a numbered revision, a copy) are one chain, shown by its newest member;
+    ///  • each record type gets its best line (most words shared with the task, then a direct mention, then newest)
+    ///    and one more, for which a one-off title comes before yet another recurring one — so an older single record
+    ///    is not buried under the latest revisions;
+    ///  • what is left of the six is filled the same way from all types;
+    ///  • only when there are fewer different things than places are earlier members of a chain shown too, its first one first.
+    /// The topic's own name does not count as a shared word (every title has it). When no title repeats, this is the
+    /// same choice as before: about two per type, best first.
+    ///
+    /// `asking`: the task asks where something stands (Standing.asked). Then, and only if some title in the topic
+    /// speaks of a decision, a limit, or something pending or corrected:
+    ///  • such a title comes before other candidates for a type's second line and for the places left over, one that
+    ///    says it in so many words before one that only hints at it ("draft");
+    ///  • the best "pending or corrected" line and the best other "decision or limit" line are both shown, so a
+    ///    decision and what came after it appear together: if they were not chosen, each takes the place of the
+    ///    weakest line that is not a type's best line — an unmarked one, else a weakly marked one, else another
+    ///    marked one — so routine titles cannot crowd the pair out; a type's best line is never given up;
+    ///  • within each type the lines are listed newest first, so what is old is not read as what holds now.
+    /// Nothing is said about the lines: they are only chosen and ordered.
+    static func citations(_ topic: TopicSummary, prefer: [String] = [], asking: Bool = false) -> [(label: String, item: TopicItem)] {
+        // Every line is known here by its place in topic.items. Record ids are not used: they are only unique within
+        // one source, so a file and a mail may carry the same id.
+        let items = topic.items, all = Array(items.indices)
+        let nameWords = Set(topic.key.split(separator: " ").map(String.init))
+        let words = prefer.filter { !nameWords.contains($0) }
+        let fit = items.map { it in it.evidence.derivedTitle ? 0 : words.filter { mentions(it.evidence.title, word: $0) }.count }
+        func direct(_ i: Int) -> Int { items[i].direct ? 1 : 0 }
+        func date(_ i: Int) -> Date { items[i].evidence.date }
+        func best(_ a: Int, _ b: Int) -> Bool { (fit[a], direct(a), date(a), -a) > (fit[b], direct(b), date(b), -b) }
+        // chains: the same stem within one record type; how often a stem occurs in the whole topic
+        let stems = items.map { stem($0.evidence.title) }
+        var chains: [String: [Int]] = [:], order: [String] = [], seen: [String: Int] = [:]
+        for i in all {
+            seen[stems[i], default: 0] += 1
+            let k = items[i].evidence.type.rawValue + "\u{1F}" + stems[i]
+            if chains[k] == nil { order.append(k) }
+            chains[k, default: []].append(i)
+        }
+        let heads = order.map { k in chains[k]!.min { (date($0), -$0) > (date($1), -$1) }! }          // the newest member of each chain
+        func oneOff(_ i: Int) -> Int { (seen[stems[i]] ?? 1) == 1 ? 1 : 0 }
+        // standing: looked at only when the task asks, and used only when some title speaks of it
+        var standing: [Int: (decision: Int, pending: Int)] = [:]
+        if asking { for h in heads { let m = Standing.marks(items[h].evidence); if m.decision > 0 || m.pending > 0 { standing[h] = m } } }
+        let relevant = !standing.isEmpty
+        func marked(_ i: Int) -> Int { standing[i].map { max($0.decision, $0.pending) } ?? 0 }
+        func varied(_ a: Int, _ b: Int) -> Bool { (fit[a], marked(a), oneOff(a), direct(a), date(a), -a) > (fit[b], marked(b), oneOff(b), direct(b), date(b), -b) }
+        var chosen: [Int] = [], taken = Set<Int>(), firsts = Set<Int>()
+        func take(_ i: Int) { chosen.append(i); taken.insert(i) }
+        for t in topic.types {
+            let mine = heads.filter { items[$0].evidence.type == t }
+            if let first = mine.sorted(by: best).first { take(first); firsts.insert(first) }
+            if let second = mine.filter({ !taken.contains($0) }).sorted(by: varied).first { take(second) }
+        }
+        for i in heads.filter({ !taken.contains($0) }).sorted(by: varied).prefix(max(0, maxCitations - chosen.count)) { take(i) }
+        if relevant {                                                 // a decision and what came after it, together
+            func pend(_ i: Int) -> Int { standing[i]?.pending ?? 0 }
+            let open = heads.filter { pend($0) > 0 }.sorted { (fit[$0], pend($0), date($0), -$0) > (fit[$1], pend($1), date($1), -$1) }.first
+            let settled = heads.filter { (standing[$0]?.decision ?? 0) == 2 && $0 != open }.sorted { (fit[$0], date($0), -$0) > (fit[$1], date($1), -$1) }.first
+            let pair = [open, settled].compactMap { $0 }
+            for want in pair where !taken.contains(want) {
+                if chosen.count < maxCitations { take(want); continue }
+                // the weakest line that is neither a type's best line nor one of the pair: least marked first, then last in rank
+                guard let out = chosen.filter({ !firsts.contains($0) && !pair.contains($0) }).sorted(by: { marked($0) != marked($1) ? marked($0) > marked($1) : varied($0, $1) }).last else { continue }
+                chosen.removeAll { $0 == out }; taken.remove(out); take(want)
+            }
+        }
+        if chosen.count < maxCitations {                              // fewer different things than places: earlier members of the chains
+            var earliest: [Int] = []
+            for k in order where chains[k]!.count > 1 { if let e = chains[k]!.filter({ !taken.contains($0) }).min(by: { (date($0), $0) < (date($1), $1) }) { earliest.append(e) } }
+            let rest = all.filter { !taken.contains($0) && !earliest.contains($0) }
+            for i in (earliest.sorted(by: best) + rest.sorted(by: best)).prefix(maxCitations - chosen.count) { take(i) }
+        }
+        chosen = Array(chosen.prefix(maxCitations))
+        func newer(_ a: Int, _ b: Int) -> Bool { (date(a), -a) > (date(b), -b) }
+        var n: [RecordType: Int] = [:], out: [(String, TopicItem)] = []
+        for t in RecordType.allCases { for i in chosen.filter({ items[$0].evidence.type == t }).sorted(by: relevant ? newer : best) { n[t, default: 0] += 1; out.append(("[" + t.letter + String(n[t]!) + "]", items[i])) } }
+        return out
+    }
+
+    /// Does the task ask when — a date, a day or a time? Only these words, in English and Korean; nothing broader.
+    static func asksWhen(_ task: String) -> Bool {
+        let t = Topic.key(task)
+        let w = Set(t.split(whereSeparator: { !($0.isLetter || $0.isNumber) }).map(String.init))
+        return !w.isDisjoint(with: ["when", "date", "dates", "time"]) || ["언제", "며칠", "날짜", "시간"].contains { t.contains($0) }
+    }
+
+    /// The 0.5.0 choice and order of lines, kept for the one case that still uses the 0.5.0 small layout (below).
+    static func baselineCitations(_ topic: TopicSummary, prefer: [String] = []) -> [(label: String, item: TopicItem)] {
         let nameWords = Set(topic.key.split(separator: " ").map(String.init))
         let words = prefer.filter { !nameWords.contains($0) }
         func fits(_ it: TopicItem) -> Int { it.evidence.derivedTitle ? 0 : words.filter { Topic.named(in: it.evidence.title, key: $0) }.count }
@@ -727,23 +899,34 @@ enum Export {
     /// The short handoff for one topic, exactly as shown in the window. With the person's task (identifiers redacted)
     /// when they typed one. Citations are "[F1] date · type · title", marked (inferred) when the title does not name the
     /// topic or is machine-generated. No paths, addresses, links, IDs or bodies. It states signals, never outcomes.
-    /// A topic with three lines or fewer gets one header line instead of a preamble longer than its list.
+    /// A topic with three lines or fewer gets one short header line and bare lines, so the packet is not much longer
+    /// than its list: the period (shortLabel), the caveat and any caution about the sources stay; the count and the
+    /// [F1] handles go (every line is shown, and each still says its date and type); the topic's name is left out
+    /// when the task line already names it.
+    /// One exception: when the task of such a small packet asks when (asksWhen), the packet is written exactly as
+    /// 0.5.0 wrote it — topic, full period, count, caveat and numbered lines. With the short form a small local model
+    /// was seen to make up a time for such a question, where it declined to with the 0.5.0 text.
     static func simple(task: String, topic: TopicSummary, window: HorizonWindow, coverage: [SourceCoverage]) -> String {
         let taskLine = Redact.label(task, max: 140)
-        let cited = citations(topic, prefer: Search.tokens(taskLine))             // only the words that are shown: nothing that was redacted
+        let small = topic.items.count <= tiny
+        let asWas = small && asksWhen(taskLine)                                  // a small packet and a "when" question: the 0.5.0 text, byte for byte
+        let cited = asWas ? baselineCitations(topic, prefer: Search.tokens(taskLine)) : citations(topic, prefer: Search.tokens(taskLine), asking: Standing.asked(taskLine))      // only the words that are shown: nothing that was redacted
         let note = caption(coverage)
         var lines: [String] = []
         if !taskLine.isEmpty { lines.append("Task: " + taskLine) }
         let name = Redact.label(topic.display, max: 60)
-        if topic.items.count <= tiny {
+        if asWas {
             lines.append("Topic: \(name) · \(window.dayLabel) · \(plural(topic.items.count, "record")) — titles are signals, not proof of completed work" + (note.map { " · Source caution: " + Redact.label($0, max: 120) } ?? ""))
+        } else if small {
+            let named = !taskLine.isEmpty && Topic.named(in: taskLine, key: topic.key)
+            lines.append((named ? "" : "Topic: \(name) · ") + window.shortLabel + " · titles are signals, not proof of completed work" + (note.map { " · Source caution: " + Redact.label($0, max: 120) } ?? ""))
         } else {
             let byType = topic.types.map { "\($0.label) \(topic.count(of: $0))" }.joined(separator: " · ")
             lines.append("Topic: \(name) · \(window.dayLabel)")
             lines.append("Signals: \(plural(topic.items.count, "record")) (\(byType)) · \(topic.direct) direct / \(topic.inferred) inferred — title counts are signals, not proof of completed work")
         }
         for c in cited {
-            lines.append(c.label + " " + Dates.day(c.item.evidence.date, window.calendar) + " · " + c.item.evidence.type.label + " · " + Redact.label(c.item.evidence.title) + (c.item.direct ? "" : " (inferred)"))
+            lines.append((small && !asWas ? "" : c.label + " ") + Dates.day(c.item.evidence.date, window.calendar) + " · " + c.item.evidence.type.label + " · " + Redact.label(c.item.evidence.title) + (c.item.direct ? "" : " (inferred)"))
         }
         if topic.items.count > cited.count { lines.append("\(topic.items.count - cited.count) more not shown") }
         if topic.items.count > tiny, let n = note { lines.append("Source caution: " + Redact.label(n, max: 160)) }
@@ -1038,5 +1221,126 @@ struct Preferences {
         case .ok(let s, let e, _): return (HorizonWindow(customStart: s, customEnd: e, now: now, calendar: calendar), nil)
         case .refused(let why): return (HorizonWindow(months: months, now: now, calendar: calendar), "The saved custom period cannot be used; showing \(months) months — " + why)
         }
+    }
+}
+
+// MARK: - Headless lookup for Aside (and any other local caller)
+
+/// `ContextaHorizon --aside-lookup`: one question in on standard input, one answer out on standard output, and
+/// nothing else. It runs before any window, menu or AppKit object exists. It reads the same files and the same saved
+/// settings (period, custom days, source switches) as the windows, picks the topic the simple screen would pick for
+/// that text, and returns exactly the handoff that screen would show. It writes no file, no setting and no
+/// clipboard, starts no program, and uses no network or model.
+///
+///   in:   {"query":"Follow up on the Harborline quote"}            (one JSON object, at most 8 KiB)
+///   out:  {"schema":"horizon.aside.v1","status":"matched","handoff":"…","reason":"","sources":{…}}
+///
+/// status   matched      a topic was found; `handoff` is byte-for-byte what the Copy button would copy
+///          no_match     the sources were read but nothing fits the query; `handoff` is empty
+///          invalid      the input is not one {"query": "<text>"} object within the size limit; nothing was read
+///          unavailable  there is nothing to search: every source that is on is missing, unreadable or empty
+/// The query itself appears only inside `handoff` (as its redacted "Task:" line), never in any other field.
+enum AsideLookup {
+    static let schema = "horizon.aside.v1"
+    static let maxInputBytes = 8 * 1024
+
+    enum Status: String { case matched, noMatch = "no_match", invalid, unavailable }
+
+    struct Answer: Equatable {
+        var status: Status
+        var handoff = ""
+        /// A fixed word from a short list (never text from the input or the data).
+        var reason = ""
+        /// Each source as it was found: ok, empty, missing, unreadable or off. Empty when the input was refused.
+        var sources: [String: String] = [:]
+        var exitCode: Int32 { switch status { case .matched, .noMatch: return 0; case .invalid: return 2; case .unavailable: return 3 } }
+    }
+
+    /// What the windows work from: the period in force, each source's coverage and the topics, from the saved settings.
+    struct View {
+        let window: HorizonWindow
+        let coverage: [SourceCoverage]
+        let topics: [TopicSummary]
+    }
+    static func view(_ snapshot: Snapshot, preferences: Preferences, now: Date) -> View {
+        let window = preferences.window(now: now).window
+        let enabled = preferences.enabled
+        return View(window: window, coverage: SourceKind.allCases.map { snapshot.coverage(for: $0, window: window, enabled: enabled) },
+                    topics: Analysis.topics(snapshot.evidence, window: window, enabled: enabled))
+    }
+
+    /// The handoff the simple screen shows when this text is typed and nothing else is picked: the first ranked
+    /// topic, with the text as the task. nil when no topic matches.
+    static func handoff(query: String, view: View) -> String? {
+        let task = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !task.isEmpty, let top = Search.rank(task, topics: view.topics).first?.topic else { return nil }
+        return Export.simple(task: task, topic: top, window: view.window, coverage: view.coverage)
+    }
+
+    /// The query, or the reason the input is refused. Exactly one object with exactly one member, "query", a string
+    /// with something in it.
+    static func parse(_ input: Data) -> (query: String?, reason: String) {
+        if input.isEmpty { return (nil, "no_input") }
+        if input.count > maxInputBytes { return (nil, "input_too_large") }
+        guard String(data: input, encoding: .utf8) != nil, let value = try? JSONSerialization.jsonObject(with: input, options: [.fragmentsAllowed]) else { return (nil, "not_json") }
+        guard let object = value as? [String: Any] else { return (nil, "not_an_object") }
+        guard object.count == 1, let raw = object["query"] else { return (nil, object["query"] == nil ? "no_query" : "unknown_field") }
+        guard let query = raw as? String, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return (nil, "bad_query") }
+        return (query, "")
+    }
+
+    static func state(_ c: SourceCoverage) -> String {
+        if !c.enabled { return "off" }
+        if c.loaded.missing { return c.kind == .imports ? "empty" : "missing" }
+        if c.loaded.problem != nil { return "unreadable" }
+        return c.loaded.rows.isEmpty ? "empty" : "ok"
+    }
+
+    /// The whole decision, with everything it depends on passed in.
+    static func answer(input: Data, places: Places, preferences: Preferences, now: Date = Date()) -> Answer {
+        let parsed = parse(input)
+        guard let query = parsed.query else { return Answer(status: .invalid, reason: parsed.reason) }
+        let v = view(Snapshot.read(places, now: now), preferences: preferences, now: now)
+        var sources: [String: String] = [:]
+        for c in v.coverage { sources[c.kind.rawValue] = state(c) }
+        let on = v.coverage.filter { $0.enabled }
+        if on.isEmpty { return Answer(status: .unavailable, reason: "all_sources_off", sources: sources) }
+        if !on.contains(where: { state($0) == "ok" }) {
+            let why = on.contains { state($0) == "unreadable" } ? "sources_unreadable" : (on.contains { state($0) == "missing" } ? "sources_missing" : "no_records")
+            return Answer(status: .unavailable, reason: why, sources: sources)
+        }
+        guard let text = handoff(query: query, view: v) else { return Answer(status: .noMatch, reason: v.topics.isEmpty ? "no_topics_in_period" : "no_matching_topic", sources: sources) }
+        return Answer(status: .matched, handoff: text, sources: sources)
+    }
+
+    /// One line of JSON, keys in a fixed order.
+    static func json(_ a: Answer) -> String {
+        func quoted(_ s: String) -> String {
+            let d = (try? JSONSerialization.data(withJSONObject: s, options: [.fragmentsAllowed, .withoutEscapingSlashes])) ?? Data("\"\"".utf8)
+            return String(decoding: d, as: UTF8.self)
+        }
+        let sources = SourceKind.allCases.compactMap { k in a.sources[k.rawValue].map { quoted(k.rawValue) + ":" + quoted($0) } }.joined(separator: ",")
+        return "{\"schema\":" + quoted(schema) + ",\"status\":" + quoted(a.status.rawValue) + ",\"handoff\":" + quoted(a.handoff) + ",\"reason\":" + quoted(a.reason) + ",\"sources\":{" + sources + "}}"
+    }
+
+    /// Standard input up to one byte past the limit (so "too large" is known without reading the rest). A terminal
+    /// with nobody piping anything in is "no input" rather than a wait.
+    static func readInput() -> Data {
+        if isatty(STDIN_FILENO) != 0 { return Data() }
+        var data = Data()
+        let input = FileHandle.standardInput
+        while data.count <= maxInputBytes {
+            let chunk = input.readData(ofLength: maxInputBytes + 1 - data.count)
+            if chunk.isEmpty { break }
+            data.append(chunk)
+        }
+        return data
+    }
+
+    /// The command: read, answer, print one line, and give the exit status (0 matched or no match, 2 invalid, 3 unavailable).
+    static func run() -> Int32 {
+        let a = answer(input: readInput(), places: Places.standard(), preferences: Preferences(store: DefaultsStore()))
+        FileHandle.standardOutput.write(Data((json(a) + "\n").utf8))
+        return a.exitCode
     }
 }

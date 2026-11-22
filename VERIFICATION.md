@@ -1,46 +1,31 @@
-# Contexta Horizon 0.4.1: verification report
+# What changed, and what the tests actually show
 
-Tested November 22, 2026 on one Apple Silicon Mac running macOS 27.2.1. This report separates release behavior from the separate, optional local-model experiment. No private records are published.
+**Contexta Horizon 0.5.1 (build 7)** · Apple Silicon local preview, ad-hoc signed, not notarized. All inputs below are fictional. We measured the app's retrieval separately from a model's ability to use what it received.
 
-## Release checks
+| Measure | 0.5.0 | 0.5.1 |
+|---|---:|---:|
+| Target facts present in selected titles, four development tasks | 6/8 | 8/8 |
+| Target references in six separately held-out English/Korean cases | 9/10 | 10/10 |
+| Correct final answers, four development tasks, Qwen2.5-1.5B-Instruct | 2/4 | 2/4 |
+| Model calls across those tasks, including retries | 6 | 6 |
+| Total input + output tokens across the four tasks | 3,127 | 3,119 |
+| Two-record task, tokens through correct answer | 201 | 171 |
 
-- Candidate build 5, arm64, bundle ID `local.workindex.horizon`: 40/40 Horizon self-test checks passed; 15/15 static checks passed. Strict ad-hoc code-signature verification passed.
-- Actual native synthetic window flow passed: launch, type, review the inline packet, switch topic, no match disables Copy, settings and custom period, then back. No general-clipboard write or external AI transfer in that smoke test.
-- Separate native-button harness: clicking an enabled Copy button wrote the exact displayed text; a disabled button wrote nothing. The only substituted dependency was an in-memory pasteboard. This is not a test of another app pasting from the macOS system clipboard.
-- empty profile→explicit public .mbox import→topic→usable preview. Rows: 3. First topic: Harborline.
-- Original installed 0.4.0 baseline: 38/38 synthetic self-tests. English release build tested separately. Exact benchmark prompt regeneration from the final release engine was checked byte for byte.
-- The packaged ZIP was unpacked, its executable compared byte for byte with the tested executable, its signature checked and its self-tests rerun before publication. Identifiers, snapshots and sample materials in the archive are fictional.
+**The comparison is with Horizon 0.5.0, not with ChatGPT or Claude.** Pasting the full list on the two-record task cost only 143 tokens. Identical model inputs reused their measured result; changed inputs used the same local model, temperature, seed and retry policy. [Per-round results and actual answers](Evaluation/0.5.1/rounds.json) · [Model and scoring protocol](Benchmark/README.md).
 
-**Not verified:** Developer ID signing or notarization; Intel, the oldest supported deployment target, an independent clean physical Mac, live Mail account/permissions, provider billing, or population-level savings. An empty home-directory fixture is not a separate physical machine. Horizon is a local metadata handoff, not a file-content indexer, a live Gmail client or an AI connector.
+### Three changes, three checks
 
-# Benchmark: tokens to a checked answer
+1. **Short handoffs:** remove repetitive headings on most small results; retain dates, types and warnings. With one Korean meeting question, compaction led the model to invent a time. Restoring the original small timing layout restored abstention on that case. This is not a general hallucination fix.
+2. **Diverse citations:** choose among reply and revision chains instead of blindly filling six places with recent variations. The 30-row Coralwick packet recovered the title containing the 17-unit limit and February review. The model still failed the two-part answer after a retry.
+3. **Status and corrections:** distinguish substantive holds and constraints from routine mentions. A targeted English/Korean stress probe recovered 4/4 requested status references versus 0/4 after round two. That probe informed the fix; it is **not** part of the held-out score. Distinct evidence with reused source-local IDs is preserved (6/6 in the collision regression).
 
-Question: for the same fictional task, does the Horizon handoff use fewer tokens **through the final answer**, including retries, than pasting the entire topic's dated title list?
+### Native checks
 
-| Fictional task | Records | Full list | Horizon | Final answer |
-|---|---:|---:|---:|---|
-| Asterline: carton count + pickup day | 48 | 1,391 | 358 | Both correct: 48, Thursday |
-| Bellwater: proof finish + quantity | 2 | 143 | 201 | Both correct: satin, 125 |
-| Coralwick: an older exception | 30 | 2,631 | 1,598 | Both failed after retry: missed 17 units and February |
-| Dunhaven: signature vs. legal review | 9 | 928 | 970 | Both failed after retry: correctly withheld signature confirmation but omitted the draft sent for legal review |
+- 58/58 synthetic self-tests, 16/16 static checks; the example mailbox imports on an empty profile.
+- Native window smoke: type, inspect, change topics, no match, change period, return. No clipboard write during the smoke run.
+- Independent synthetic fixture: the visible native preview matched the actual headless result byte for byte. The optional Aside helper uses that command, not a separate summarizer.
+- Distribution: arm64 executable, ad-hoc signature; the unpacked public ZIP verified locally. SHA-256 digests accompany the release.
 
-**Across the two tasks both arms completed correctly**, the full list used 1,534 tokens, Horizon 559 (63.6% fewer in aggregate). Most of this gain came from one 48-record task. On the two-record task, Horizon cost 58 more tokens (40.6% more). Across **all attempts**, including failures, the totals were 5,093 vs. 3,127 (38.6% fewer); both arms passed only 2/4 and made six model calls. Spending fewer tokens on a failed answer is not a successful saving. These figures are sums, not average percentage savings per person or task.
+**Limits:** one small model, constructed cases, titles rather than document bodies. Another probe still produced an unsupported conclusion about a signature. A missing confirmation is not evidence of non-signature. These experiments do not measure real-user time, API bills or provider-model accuracy. [Earlier 0.4.1 report](https://github.com/AgentChiChi/contexta-horizon/blob/v0.4.1/VERIFICATION.md).
 
-**What went wrong:** the short Coralwick packet omitted the older fact. It was in the full list and in the second-turn recovery list, but the model still did not extract it. For Dunhaven the relevant draft was present, but neither arm supplied the second required fact. Short packets do not eliminate the need to check sources.
-
-## Reproduce
-
-Use the bundled `cases.json` (exact English prompts), `results.json` (actual answers and per-call prompt/completion counts), `Benchmark.swift` (fixture generator), `protocol.txt` (scoring contract) and `run.mjs` (loopback-only model driver). No user records are included. Run on an Apple Silicon Mac with Swift and Node 18+:
-
-```sh
-swiftc -O Sources/Core.swift Benchmark/Benchmark.swift -o /tmp/horizon-benchmark
-TZ=UTC /tmp/horizon-benchmark > /tmp/horizon-cases.json
-# Start your own llama.cpp server; the benchmark makes requests only to localhost.
-llama-server -m /path/to/qwen2.5-1.5b-instruct-q4_k_m.gguf --host 127.0.0.1 --port 18471 --device none --fit off --no-op-offload -ngl 0 -fa off -c 8192 -np 1 -t 6 --no-warmup
-# In a second terminal:
-node Benchmark/run.mjs /tmp/horizon-cases.json /tmp/horizon-results.json
-```
-
-Test runtime: [llama.cpp b12626](https://github.com/ggml-org/llama.cpp/releases/tag/b12626), [Qwen2.5-1.5B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/tree/91cad51170dc346986eccefdc2dd33a9da36ead9), Q4_K_M model file SHA-256 `6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e`. Temperature 0, seed 42, maximum 120 output tokens. Each arm starts a fresh chat. On a failed two-part answer, the driver retries once with the full title list and prior conversation. Counts are the model server's reported input and output tokens, including chat framing and replayed history. The model, weights and runtime are not distributed in the app.
-
-**Limits:** Four constructed cases and one small local model, not a random sample of user work. The baseline is pasting all relevant metadata, not expert manual selection. Inputs are titles, not message or document bodies; no optional coverage warnings were supplied to the isolated exporter. Actual windows can add them. This does not measure people’s time, paid API bills, cached-token discounts, or ChatGPT/Claude/OpenClaw performance. No external model integration or tokens are needed for Horizon itself to prepare the handoff.
+The distributable is the previously verified app, not a new unsigned recompile. Its built-in self-test contains fictional redaction fixtures; a binary string scan therefore finds **synthetic** paths and addresses. The release ZIP was rebuilt from an allowlist (executable, Info.plist, signature) to exclude macOS extended-attribute sidecars. These checks do not imply Apple notarization or Gatekeeper approval.

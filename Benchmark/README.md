@@ -1,5 +1,8 @@
 # Benchmark: tokens to a checked answer
 
+> Historical 0.4.1 benchmark and fixtures. For the 0.5.0 to 0.5.1 comparison, see [current verification](../VERIFICATION.md).
+
+
 Question: for the same fictional task, does the Horizon handoff use fewer tokens **through the final answer**, including retries, than pasting the entire topic's dated title list?
 
 | Fictional task | Records | Full list | Horizon | Final answer |

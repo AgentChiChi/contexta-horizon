@@ -78,7 +78,7 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
 
         copyButton.target = self; copyButton.action = #selector(copyShown); copyButton.bezelStyle = .rounded; copyButton.controlSize = .large
         copyButton.bezelColor = .controlAccentColor
-        copyButton.toolTip = "Copies exactly the text shown above to the clipboard. Nothing is copied until you press this."
+        copyButton.toolTip = "Copies exactly the text shown above to the clipboard, as plain text that works in ChatGPT, Claude and Aside. Nothing is copied until you press this."
         copyButton.isEnabled = false
         advanced.target = self; advanced.action = #selector(openAdvanced); advanced.isBordered = false
         advanced.attributedTitle = NSAttributedString(string: "Sources & Settings", attributes: [.foregroundColor: NSColor.linkColor, .font: NSFont.systemFont(ofSize: 12)])

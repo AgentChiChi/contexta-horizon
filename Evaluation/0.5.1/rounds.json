@@ -1,0 +1,158 @@
+[
+  {
+    "n": "baseline",
+    "citedFacts": [
+      2,
+      2,
+      0,
+      2
+    ],
+    "tinyHeaderBytes": 200,
+    "tinyTaskAndPacketBytes": 374,
+    "blind": 9,
+    "safe": true,
+    "solved": 2,
+    "calls": 6,
+    "tokens": 3127,
+    "tinyTokens": 201,
+    "answers": [
+      [
+        "Asterline",
+        true,
+        "The latest dispatch note for Asterline specifies 48 cartons and a pickup on Thursday."
+      ],
+      [
+        "Bellwater",
+        true,
+        "The proof request for Bellwater specifies a satin finish with a quantity of 125."
+      ],
+      [
+        "Coralwick",
+        false,
+        "The records do not provide specific information about the number of items permitted or when the team should revisit that decision for Coralwick."
+      ],
+      [
+        "Dunhaven",
+        false,
+        "The records do not establish that the agreement was signed."
+      ]
+    ]
+  },
+  {
+    "n": "round1",
+    "citedFacts": [
+      2,
+      2,
+      0,
+      2
+    ],
+    "tinyHeaderBytes": 151,
+    "tinyTaskAndPacketBytes": 315,
+    "blind": 9,
+    "safe": true,
+    "solved": 2,
+    "calls": 6,
+    "tokens": 3097,
+    "tinyTokens": 171,
+    "answers": [
+      [
+        "Asterline",
+        true,
+        "The latest dispatch note for Asterline specifies 48 cartons and a pickup on Thursday."
+      ],
+      [
+        "Coralwick",
+        false,
+        "The records do not provide specific information about the number of items permitted or when the team should revisit that decision for Coralwick."
+      ],
+      [
+        "Dunhaven",
+        false,
+        "The records do not establish that the agreement was signed."
+      ],
+      [
+        "Bellwater",
+        true,
+        "The proof request for Bellwater specifies a satin finish with a quantity of 125."
+      ]
+    ]
+  },
+  {
+    "n": "round2",
+    "citedFacts": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "tinyHeaderBytes": 151,
+    "tinyTaskAndPacketBytes": 315,
+    "blind": 10,
+    "safe": true,
+    "solved": 2,
+    "calls": 6,
+    "tokens": 3119,
+    "tinyTokens": 171,
+    "answers": [
+      [
+        "Asterline",
+        true,
+        "The latest dispatch note for Asterline specifies 48 cartons and a pickup on Thursday."
+      ],
+      [
+        "Bellwater",
+        true,
+        "The proof request for Bellwater specifies a satin finish with a quantity of 125."
+      ],
+      [
+        "Dunhaven",
+        false,
+        "The records do not establish that the agreement was signed."
+      ],
+      [
+        "Coralwick",
+        false,
+        "The team should revisit the decision regarding the number of items permitted in Coralwick by 2026-11-20, as evidenced by the additional dated titles provided."
+      ]
+    ]
+  },
+  {
+    "n": "round3",
+    "citedFacts": [
+      2,
+      2,
+      2,
+      2
+    ],
+    "tinyHeaderBytes": 151,
+    "tinyTaskAndPacketBytes": 315,
+    "blind": 10,
+    "safe": true,
+    "solved": 2,
+    "calls": 6,
+    "tokens": 3119,
+    "tinyTokens": 171,
+    "answers": [
+      [
+        "Asterline",
+        true,
+        "The latest dispatch note for Asterline specifies 48 cartons and a pickup on Thursday."
+      ],
+      [
+        "Bellwater",
+        true,
+        "The proof request for Bellwater specifies a satin finish with a quantity of 125."
+      ],
+      [
+        "Coralwick",
+        false,
+        "The team should revisit the decision regarding the number of items permitted in Coralwick by 2026-11-20, as evidenced by the additional dated titles provided."
+      ],
+      [
+        "Dunhaven",
+        false,
+        "The records do not establish that the agreement was signed."
+      ]
+    ]
+  }
+]
