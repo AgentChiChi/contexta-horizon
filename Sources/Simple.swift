@@ -34,14 +34,15 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
     private let dashboard: HorizonController
     private let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 560), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
     private let field = NSTextField()
-    private let hint = SimpleController.label("", size: 12, color: .secondaryLabelColor)
+    private let hint = Style.label("", Style.caption, .secondaryLabelColor)
     private let suggestionRow = NSStackView()
     private let preview = NSTextView(frame: NSRect(x: 0, y: 0, width: 540, height: 240))
-    private let emptyNote = SimpleController.label("", size: 13, color: .tertiaryLabelColor)
-    private let caption = SimpleController.label("", size: 11, color: .secondaryLabelColor)
+    private let emptyNote = Style.label("", Style.body, .tertiaryLabelColor)
+    private let caption = Style.label("", Style.caption, .secondaryLabelColor)
     private let copyButton = NSButton(title: "Copy", target: nil, action: nil)
-    private let status = SimpleController.label("", size: 12, color: .secondaryLabelColor)
+    private let status = Style.label("", Style.caption, .secondaryLabelColor)
     private let advanced = NSButton(title: "Sources & Settings", target: nil, action: nil)
+    private var toolbar: WindowToolbar?
     // The fictional example: offered only on the empty screen, and its own banner with the way out. Hidden otherwise.
     private let exampleOffer = NSButton(title: "Try a fictional example", target: nil, action: nil)
     private let exampleBanner = NSStackView()
@@ -62,35 +63,27 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         build()
     }
 
-    private static func label(_ text: String, size: CGFloat, color: NSColor, weight: NSFont.Weight = .regular) -> NSTextField {
-        let l = NSTextField(wrappingLabelWithString: text)
-        l.font = .systemFont(ofSize: size, weight: weight); l.textColor = color; l.isSelectable = false
-        l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return l
-    }
-
     private func build() {
         window.title = "Contexta Horizon"
-        window.minSize = NSSize(width: 520, height: 480)
+        window.contentMinSize = NSSize(width: 520, height: 460)          // of the content, below the toolbar
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
 
-        let title = SimpleController.label("What do you want to continue?", size: 22, color: .labelColor, weight: .semibold)
+        let title = Style.label("What do you want to continue?", Style.headline)
         field.placeholderString = "For example: follow up on the Harborline quote"
-        field.font = .systemFont(ofSize: 15)
+        field.font = Style.body
         field.delegate = self
         field.lineBreakMode = .byTruncatingTail
         field.cell?.usesSingleLineMode = true
         field.setAccessibilityLabel("Task to continue")
-        field.heightAnchor.constraint(equalToConstant: 30).isActive = true
 
         suggestionRow.orientation = .horizontal; suggestionRow.spacing = 8; suggestionRow.alignment = .centerY
         suggestionRow.setAccessibilityLabel("Suggested topics")
 
         preview.isEditable = false; preview.isSelectable = true; preview.isRichText = false
-        preview.font = .systemFont(ofSize: 12.5)
-        preview.textContainerInset = NSSize(width: 10, height: 10)
+        preview.font = Style.body
+        preview.textContainerInset = NSSize(width: 8, height: 8)
         preview.autoresizingMask = [.width]
         preview.drawsBackground = false
         preview.setAccessibilityLabel("Text that will be copied")
@@ -105,7 +98,7 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         exampleOffer.translatesAutoresizingMaskIntoConstraints = false
         exampleOffer.centerXAnchor.constraint(equalTo: inner.centerXAnchor).isActive = true
         exampleOffer.topAnchor.constraint(equalTo: emptyNote.bottomAnchor, constant: 14).isActive = true
-        let bannerText = SimpleController.label("Fictional example — made-up Harborline records. Nothing here is from your Mac, and nothing is saved or copied.", size: 12, color: .labelColor, weight: .medium)
+        let bannerText = Style.label("Fictional example — made-up Harborline records. Nothing here is from your Mac, and nothing is saved or copied.", Style.body)
         exampleExit.target = self; exampleExit.action = #selector(exitExample); exampleExit.bezelStyle = .rounded; exampleExit.controlSize = .small
         exampleExit.setContentHuggingPriority(.required, for: .horizontal); exampleExit.setContentCompressionResistancePriority(.required, for: .horizontal)
         exampleBanner.orientation = .horizontal; exampleBanner.spacing = 10; exampleBanner.alignment = .centerY
@@ -117,27 +110,30 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         box.contentView = inner
         box.heightAnchor.constraint(greaterThanOrEqualToConstant: 230).isActive = true
 
-        copyButton.target = self; copyButton.action = #selector(copyShown); copyButton.bezelStyle = .rounded; copyButton.controlSize = .large
+        copyButton.target = self; copyButton.action = #selector(copyShown); copyButton.bezelStyle = .rounded
         copyButton.bezelColor = .controlAccentColor
         copyButton.toolTip = "Copies exactly the text shown above to the clipboard, as plain text that works in ChatGPT, Claude and Aside. Nothing is copied until you press this."
         copyButton.isEnabled = false
-        advanced.target = self; advanced.action = #selector(openAdvanced); advanced.isBordered = false
-        advanced.attributedTitle = NSAttributedString(string: "Sources & Settings", attributes: [.foregroundColor: NSColor.linkColor, .font: NSFont.systemFont(ofSize: 12)])
+        // The title area is a standard toolbar, as in a Finder window; its one item opens Sources & Settings.
+        advanced.target = self; advanced.action = #selector(openAdvanced); advanced.bezelStyle = .rounded
+        advanced.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil); advanced.imagePosition = .imageLeading
         advanced.toolTip = "Period, source switches, imports and refresh. You rarely need this."
+        let bar = WindowToolbar(name: "HorizonSimple", entries: [.space, .init("settings", "Sources & Settings", advanced)])
+        bar.install(in: window); toolbar = bar
         let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let bottom = NSStackView(views: [copyButton, status, spacer, advanced]); bottom.orientation = .horizontal; bottom.spacing = 10; bottom.alignment = .centerY
+        let bottom = NSStackView(views: [copyButton, status, spacer]); bottom.orientation = .horizontal; bottom.spacing = Style.spacing; bottom.alignment = .centerY
 
         spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
         spinner.setAccessibilityLabel("Reading sources")
         let hintRow = NSStackView(views: [spinner, hint]); hintRow.orientation = .horizontal; hintRow.spacing = 6; hintRow.alignment = .centerY
         let stack = NSStackView(views: [title, field, hintRow, suggestionRow, exampleBanner, box, caption, bottom])
-        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
-        stack.setCustomSpacing(14, after: title); stack.setCustomSpacing(6, after: field); stack.setCustomSpacing(12, after: suggestionRow); stack.setCustomSpacing(6, after: box); stack.setCustomSpacing(14, after: caption)
-        stack.edgeInsets = NSEdgeInsets(top: 24, left: 26, bottom: 20, right: 26)
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = Style.spacing
+        stack.setCustomSpacing(12, after: title); stack.setCustomSpacing(6, after: field); stack.setCustomSpacing(6, after: box); stack.setCustomSpacing(12, after: caption)
+        stack.edgeInsets = NSEdgeInsets(top: Style.margin, left: Style.margin, bottom: Style.margin, right: Style.margin)
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let content = NSView(); content.addSubview(stack)
+        let content = WindowBackdrop(); content.addSubview(stack)        // the shared soft background (App.swift); everything else is laid over it
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: content.leadingAnchor), stack.trailingAnchor.constraint(equalTo: content.trailingAnchor), stack.topAnchor.constraint(equalTo: content.topAnchor), stack.bottomAnchor.constraint(equalTo: content.bottomAnchor)])
-        for v in [field, box, bottom, hintRow, caption, exampleBanner] as [NSView] { v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -52).isActive = true }
+        for v in [field, box, bottom, hintRow, caption, exampleBanner] as [NSView] { v.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -2 * Style.margin).isActive = true }
         box.setContentHuggingPriority(.defaultLow, for: .vertical)
         window.contentView = content
         refresh()
@@ -165,7 +161,9 @@ final class SimpleController: NSObject, NSTextFieldDelegate, NSWindowDelegate {
         candidates = []
         // Still reading (or still working out topics with none to show yet) is not the same as empty: say so, and keep the field usable.
         loading = example == nil && (!dashboard.isLoaded || (dashboard.isComputing && topics.isEmpty))
-        if dashboard.isWorking && example == nil { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+        let turning = dashboard.isWorking && example == nil
+        spinner.isHidden = !turning                                     // out of the row while idle, so the hint starts at the margin
+        if turning { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
         if loading {
             hint.stringValue = "Reading your sources…"
             emptyNote.stringValue = "Still reading.\nYou can type your task now; topics appear as soon as the sources are read."

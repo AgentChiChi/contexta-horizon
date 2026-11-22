@@ -5,7 +5,8 @@
 // This file holds the app delegate and the dashboard ("Sources & Settings"): the period, the source switches, coverage, the
 // evidence tables, "Read Sources" (which can include Mail, after a yes on its sheet), imports and the refresh tool —
 // everything opt-in, reached from one link. Reading, computing topics and asking Mail all happen off the main thread:
-// both windows open at once and show that they are still reading.
+// both windows open at once and show that they are still reading. Both windows share one background (WindowBackdrop, below):
+// a standard macOS material behind the window, or a plain one when "Reduce transparency" is on.
 // There is no always-on model, no key or file watcher, nothing injected or sent, and no network code.
 
 import AppKit
@@ -111,20 +112,21 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
     private let months = NSSegmentedControl(labels: ["3 months", "6 months", "Custom"], trackingMode: .selectOne, target: nil, action: nil)
     private let startPicker = NSDatePicker(), endPicker = NSDatePicker()
     private let applyButton = NSButton(title: "Apply", target: nil, action: nil)
-    private let customFeedback = HorizonController.label("", size: 12, soft: true)
+    private let customFeedback = Style.label("", Style.caption, .secondaryLabelColor)
     private let customRow = NSStackView()
     private let readButton = NSButton(title: "Read Sources", target: nil, action: nil)
     private let importButton = NSButton(title: "Import…", target: nil, action: nil)
     private let toolButton = NSButton(title: "Refresh Feeds…", target: nil, action: nil)
     private let spinner = NSProgressIndicator()
     private let copyButton = NSButton(title: "Open in Simple View", target: nil, action: nil)
-    private let backButton = NSButton(title: "‹ Simple View", target: nil, action: nil)
+    private let backButton = NSButton(title: "Simple View", target: nil, action: nil)
+    private var toolbar: WindowToolbar?
     private let quitButton = NSButton(title: "Quit", target: nil, action: nil)
     private var coverages: [SourceCoverage] = []
-    private let windowLabel = HorizonController.label("", size: 12, soft: true)
-    private let statusLabel = HorizonController.label("", size: 12, soft: true)
-    private let toolLabel = HorizonController.label("", size: 11, soft: true)
-    private let evidenceHeader = HorizonController.label("Evidence — choose a topic on the left", size: 13, soft: false)
+    private let windowLabel = Style.label("", Style.caption, .secondaryLabelColor)
+    private let statusLabel = Style.label("", Style.caption, .secondaryLabelColor)
+    private let toolLabel = Style.label("", Style.caption, .secondaryLabelColor)
+    private let evidenceHeader = Style.label("Evidence — choose a topic on the left", Style.body)
     private var sourceChecks: [SourceKind: NSButton] = [:]
     private var sourceLabels: [SourceKind: NSTextField] = [:]
     private let topicTable = NSTableView()
@@ -139,23 +141,13 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         build()
     }
 
-    private static func label(_ text: String, size: CGFloat, soft: Bool) -> NSTextField {
-        let l = NSTextField(wrappingLabelWithString: text)
-        l.font = .systemFont(ofSize: size)
-        l.textColor = soft ? .secondaryLabelColor : .labelColor
-        l.isSelectable = false
-        l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        return l
-    }
-
     private func build() {
         window.title = "Contexta Horizon — Sources & Settings"
-        window.minSize = NSSize(width: 960, height: 540)
+        window.contentMinSize = NSSize(width: 960, height: 560)          // of the content, below the toolbar
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
 
-        let title = HorizonController.label("Sources & Settings", size: 17, soft: false)
         months.selectedSegment = preferences.usesCustom ? 2 : (preferences.months == 6 ? 1 : 0)
         months.target = self; months.action = #selector(monthsChanged)
         // Custom: two whole days, both included
@@ -166,7 +158,7 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         startPicker.setAccessibilityLabel("Start date"); endPicker.setAccessibilityLabel("End date")
         applyButton.target = self; applyButton.action = #selector(applyCustom); applyButton.bezelStyle = .rounded
         applyButton.toolTip = "Applies the period from the start date through the end date, both included (up to 6 months, no later than today)"
-        let startLabel = HorizonController.label("Start", size: 12, soft: false), endLabel = HorizonController.label("End", size: 12, soft: false)
+        let startLabel = Style.label("Start", Style.body), endLabel = Style.label("End", Style.body)
         for v in [startLabel, startPicker, endLabel, endPicker, applyButton, customFeedback] as [NSView] { customRow.addArrangedSubview(v) }
         customRow.orientation = .horizontal; customRow.spacing = 8; customRow.alignment = .centerY
         customRow.isHidden = !preferences.usesCustom
@@ -174,7 +166,7 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         months.setAccessibilityLabel("Period")
         for (b, sel) in [(readButton, #selector(readSources(_:))), (importButton, #selector(importExport)), (toolButton, #selector(runTool)), (copyButton, #selector(useInSimple)), (backButton, #selector(goBack))] { b.target = self; b.action = sel; b.bezelStyle = .rounded }
         readButton.keyEquivalent = "\r"                                 // the primary action of this window
-        spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false
+        spinner.style = .spinning; spinner.controlSize = .small; spinner.isDisplayedWhenStopped = false; spinner.isHidden = true
         spinner.setAccessibilityLabel("Reading sources")
         quitButton.target = NSApp; quitButton.action = #selector(NSApplication.terminate(_:)); quitButton.bezelStyle = .rounded
         backButton.toolTip = "Back to the “What do you want to continue?” screen"
@@ -182,9 +174,12 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         importButton.toolTip = "Imports an export file from this Mac: a ChatGPT or Claude conversations.json, an Apple Mail or Gmail Takeout .mbox, or a normalized .jsonl (saved as a new file; records already imported are skipped)"
         copyButton.toolTip = "Opens the selected topic in the simple view. Copying happens only there, with its Copy button."
         copyButton.isEnabled = false
-        let spacer = NSView(); spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let top = NSStackView(views: [backButton, title, months, spacer, spinner, readButton, importButton, toolButton])
-        top.orientation = .horizontal; top.spacing = 10; top.alignment = .centerY
+        // The title area is a standard toolbar, as in a Finder window: the way back before the title, the period and the three actions after it.
+        backButton.image = NSImage(systemSymbolName: "chevron.backward", accessibilityDescription: nil); backButton.imagePosition = .imageLeading
+        backButton.setAccessibilityLabel("Back to Simple View"); months.toolTip = "The period that is shown"
+        let bar = WindowToolbar(name: "HorizonSettings", entries: [.init("back", "Simple View", backButton, navigational: true), .init("period", "Period", months), .space,
+                                                                    .init("read", "Read Sources", readButton), .init("import", "Import", importButton), .init("refresh", "Refresh Feeds", toolButton)])
+        bar.install(in: window); toolbar = bar
 
         let sources = NSStackView(); sources.orientation = .vertical; sources.alignment = .leading; sources.spacing = 4
         for kind in SourceKind.allCases {
@@ -192,17 +187,17 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
             check.state = preferences.isOn(kind) ? .on : .off
             check.tag = SourceKind.allCases.firstIndex(of: kind) ?? 0
             check.widthAnchor.constraint(equalToConstant: 110).isActive = true
-            let text = HorizonController.label("Not read yet", size: 12, soft: true)
+            let text = Style.label("Not read yet", Style.caption, .secondaryLabelColor)
             let row = NSStackView(views: [check, text]); row.orientation = .horizontal; row.alignment = .firstBaseline; row.spacing = 6
             sources.addArrangedSubview(row)
             sourceChecks[kind] = check; sourceLabels[kind] = text
         }
 
-        configure(topicTable, columns: [("topic", "Topic", 110), ("types", "Types", 150), ("count", "Records", 52), ("signal", "Direct / Inferred", 96), ("last", "Latest", 88)])
-        configure(evidenceTable, columns: [("date", "Record date", 118), ("type", "Type", 40), ("signal", "Signal", 56), ("title", "Title", 200), ("source", "Source", 110), ("imported", "Origin · imported", 160)])
+        configure(topicTable, columns: [("topic", "Topic", 110), ("types", "Types", 112), ("count", "Records", 56), ("signal", "Direct / Inferred", 96), ("last", "Latest", 80)])
+        configure(evidenceTable, columns: [("date", "Record date", 124), ("type", "Type", 40), ("signal", "Signal", 58), ("title", "Title", 140), ("source", "Source", 84), ("imported", "Origin · imported", 104)])
         topicTable.setAccessibilityLabel("Topics"); evidenceTable.setAccessibilityLabel("Evidence")
         let left = scroll(topicTable), right = scroll(evidenceTable)
-        let copyNote = HorizonController.label("Copying happens only in the simple view. No always-on model · nothing is injected · title counts are signals, not proof of completed work.", size: 11, soft: true)
+        let copyNote = Style.label("Copying happens only in the simple view. No always-on model · nothing is injected · title counts are signals, not proof of completed work.", Style.caption, .secondaryLabelColor)
         let copySpacer = NSView(); copySpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let copyRow = NSStackView(views: [copyButton, copyNote, copySpacer, quitButton]); copyRow.orientation = .horizontal; copyRow.spacing = 8
         let rightStack = NSStackView(views: [evidenceHeader, right, copyRow]); rightStack.orientation = .vertical; rightStack.alignment = .leading; rightStack.spacing = 6
@@ -210,18 +205,21 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         copyRow.widthAnchor.constraint(equalTo: rightStack.widthAnchor).isActive = true
         split.isVertical = true; split.dividerStyle = .thin
         split.addArrangedSubview(left); split.addArrangedSubview(rightStack)
-        let leftWidth = left.widthAnchor.constraint(equalToConstant: 520); leftWidth.priority = .defaultHigh; leftWidth.isActive = true
+        let leftWidth = left.widthAnchor.constraint(equalToConstant: topicsWidth); leftWidth.priority = NSLayoutConstraint.Priority(490); leftWidth.isActive = true   // gives way when the window is made narrower
         left.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
+        // in a narrow window the two lists share the squeeze (each scrolls sideways) rather than the evidence taking all of it
+        let rightWidth = rightStack.widthAnchor.constraint(greaterThanOrEqualToConstant: 440); rightWidth.priority = NSLayoutConstraint.Priority(760); rightWidth.isActive = true
 
-        let root = NSStackView(views: [top, customRow, windowLabel, sources, toolLabel, split, statusLabel])
-        root.orientation = .vertical; root.alignment = .leading; root.spacing = 8
-        root.edgeInsets = NSEdgeInsets(top: 14, left: 16, bottom: 12, right: 16)
+        let statusRow = NSStackView(views: [spinner, statusLabel]); statusRow.orientation = .horizontal; statusRow.spacing = 6; statusRow.alignment = .centerY
+        let root = NSStackView(views: [customRow, windowLabel, sources, toolLabel, split, statusRow])
+        root.orientation = .vertical; root.alignment = .leading; root.spacing = Style.spacing
+        root.edgeInsets = NSEdgeInsets(top: Style.margin, left: Style.margin, bottom: Style.margin, right: Style.margin)
         root.translatesAutoresizingMaskIntoConstraints = false
-        let content = NSView()
+        let content = WindowBackdrop()                                  // the shared soft background; everything else is laid over it
         content.addSubview(root)
         NSLayoutConstraint.activate([root.leadingAnchor.constraint(equalTo: content.leadingAnchor), root.trailingAnchor.constraint(equalTo: content.trailingAnchor),
                                      root.topAnchor.constraint(equalTo: content.topAnchor), root.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-                                     top.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -32), split.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -32)])
+                                     split.widthAnchor.constraint(equalTo: root.widthAnchor, constant: -2 * Style.margin)])
         split.setContentHuggingPriority(.defaultLow, for: .vertical)
         window.contentView = content
         statusLabel.stringValue = "Local only — reads files on this Mac and uses no network."
@@ -229,17 +227,21 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
     }
 
     private func configure(_ table: NSTableView, columns: [(String, String, CGFloat)]) {
-        for (id, title, width) in columns {
-            let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id)); c.title = title; c.width = width; c.minWidth = 36
-            table.addTableColumn(c)
-        }
+        for (id, title, width) in columns { table.addTableColumn(Style.column(id, title, width: width, flexible: id == "title")) }   // only the evidence title takes up spare room
         table.dataSource = self; table.delegate = self
-        table.usesAlternatingRowBackgroundColors = true
-        table.allowsMultipleSelection = false
-        table.rowHeight = 22
+        Style.list(table)
     }
+    /// The width the topics list is given: its five columns as they are (each at least as wide as its title), with the
+    /// list's own margins, its border and — where scroll bars are always shown — the scroll bar.
+    private var topicsWidth: CGFloat {
+        topicTable.tile()
+        let first = topicTable.rect(ofColumn: 0), last = topicTable.rect(ofColumn: topicTable.numberOfColumns - 1)
+        let bar = NSScroller.preferredScrollerStyle == .legacy ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) : 0
+        return ceil(last.maxX + first.minX) + 2 + bar
+    }
+    private static let leading: Set<String> = ["topic", "title"]
     private func scroll(_ table: NSTableView) -> NSScrollView {
-        let s = NSScrollView(); s.documentView = table; s.hasVerticalScroller = true; s.hasHorizontalScroller = true; s.borderType = .bezelBorder
+        let s = NSScrollView(); s.documentView = table; s.hasVerticalScroller = true; s.hasHorizontalScroller = true; s.borderType = .lineBorder; s.autohidesScrollers = true
         s.heightAnchor.constraint(greaterThanOrEqualToConstant: 220).isActive = true
         return s
     }
@@ -247,7 +249,7 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
     func show() {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        if !placedDivider { placedDivider = true; window.layoutIfNeeded(); split.setPosition(520, ofDividerAt: 0) }   // room for all five topic columns
+        if !placedDivider { placedDivider = true; window.layoutIfNeeded(); split.setPosition(topicsWidth, ofDividerAt: 0) }   // room for all five topic columns
         ensureLoaded()
     }
 
@@ -360,6 +362,7 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
     /// What is held in memory right now, by where it came from and by record type (nothing excluded may be here).
     var smokeHeld: String { guard let s = snapshot else { return "none" }; return SourceKind.allCases.map { k in "\(k.rawValue):\(s.evidence.filter { $0.origin == k }.count)" }.joined(separator: " ") + " | " + RecordType.allCases.map { t in "\(t.rawValue):\(s.evidence.filter { $0.type == t }.count)" }.joined(separator: " ") }
     func smokeBack() { goBack() }
+    func smokeDeselect() { topicTable.deselectAll(nil) }
     /// Selects a topic row by the topic's key, as a click on that row would (never by a fixed row number: the order
     /// changes with the period and the switches). Answers the row it was found at, or nil when it is not in view.
     @discardableResult
@@ -474,7 +477,9 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
 
     /// The spinner in this window, and the simple view's, follow what is going on.
     private func progress() {
-        if isWorking || (collecting && mailSheet == nil) { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
+        let turning = isWorking || (collecting && mailSheet == nil)
+        spinner.isHidden = !turning                                     // out of the row while idle, so the status line starts at the margin
+        if turning { spinner.startAnimation(nil) } else { spinner.stopAnimation(nil) }
     }
 
     @objc private func runTool() {
@@ -594,10 +599,8 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
             default: text = e.provenance + (e.derivedTitle ? " · auto title" : "") + (e.importedAt.map { " · " + Dates.minute($0) } ?? "")
             }
         }
-        let cell = (tableView.makeView(withIdentifier: id, owner: self) as? NSTextField) ?? {
-            let f = NSTextField(labelWithString: ""); f.identifier = id; f.lineBreakMode = .byTruncatingTail; f.font = .systemFont(ofSize: 12); return f
-        }()
-        cell.stringValue = text
+        let cell = (tableView.makeView(withIdentifier: id, owner: self) as? NSTableCellView) ?? Style.cell(id, primary: HorizonController.leading.contains(id.rawValue))
+        cell.textField?.stringValue = text
         cell.toolTip = text
         return cell
     }
@@ -607,6 +610,176 @@ final class HorizonController: NSObject, NSTableViewDataSource, NSTableViewDeleg
         let row = topicTable.selectedRow
         selected = row >= 0 && row < topics.count ? topics[row] : nil
         showSelection()
+    }
+}
+
+/// The shared look of both windows: this Mac's own regular and small control metrics, the ones a Finder window in list
+/// view is made of. Nothing here names a font or reads anyone's Finder settings: every size is asked of AppKit.
+enum Style {
+    /// Regular text — list cells, the preview, the task field, buttons: the system's regular size (13 on current macOS).
+    static var body: NSFont { .systemFont(ofSize: NSFont.systemFontSize) }
+    /// Secondary captions: the system's small size (11).
+    static var caption: NSFont { .systemFont(ofSize: NSFont.smallSystemFontSize) }
+    /// The one compact headline of a window: the system's third title size (15), semibold.
+    static var headline: NSFont { .systemFont(ofSize: NSFont.preferredFont(forTextStyle: .title3).pointSize, weight: .semibold) }
+    /// The standard margin between a window's edge and its content, and the space between rows of content.
+    static let margin: CGFloat = 20
+    static let spacing: CGFloat = 8
+    /// A list row as AppKit makes it by default on current macOS, and as Finder's list view has it: 24 points, cells 17 apart.
+    static let rowHeight: CGFloat = 24
+    static let cellSpacing = NSSize(width: 17, height: 0)
+
+    static func label(_ text: String, _ font: NSFont, _ color: NSColor = .labelColor) -> NSTextField {
+        let l = NSTextField(wrappingLabelWithString: text)
+        l.font = font; l.textColor = color; l.isSelectable = false
+        l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return l
+    }
+
+    /// A list in the density of Finder's list view: 24-point rows, striped, rounded selection, no grid, the standard header.
+    static func list(_ table: NSTableView) {
+        table.style = .inset
+        table.rowSizeStyle = .custom
+        table.rowHeight = rowHeight
+        table.intercellSpacing = cellSpacing
+        table.usesAlternatingRowBackgroundColors = true
+        table.gridStyleMask = []
+        table.allowsMultipleSelection = false
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+    }
+
+    /// A column that is never narrower than its own title; only a `flexible` one takes up spare room, and it never
+    /// gives up the width it was made with (a list that does not fit scrolls sideways instead).
+    static func column(_ id: String, _ title: String, width: CGFloat, flexible: Bool = false) -> NSTableColumn {
+        let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id))
+        c.title = title
+        c.minWidth = max(flexible ? width : 36, ceil(c.headerCell.cellSize.width))
+        c.width = max(width, c.minWidth)
+        c.resizingMask = flexible ? [.autoresizingMask, .userResizingMask] : .userResizingMask
+        return c
+    }
+
+    /// A list cell: one line of regular text, centred in its row; the leading column in the label colour, the others secondary.
+    static func cell(_ id: NSUserInterfaceItemIdentifier, primary: Bool) -> NSTableCellView {
+        let cell = NSTableCellView(), text = NSTextField(labelWithString: "")
+        text.font = body; text.textColor = primary ? .labelColor : .secondaryLabelColor; text.lineBreakMode = .byTruncatingTail
+        text.translatesAutoresizingMaskIntoConstraints = false
+        cell.identifier = id; cell.addSubview(text); cell.textField = text
+        NSLayoutConstraint.activate([text.leadingAnchor.constraint(equalTo: cell.leadingAnchor), text.trailingAnchor.constraint(equalTo: cell.trailingAnchor), text.centerYAnchor.constraint(equalTo: cell.centerYAnchor)])
+        return cell
+    }
+}
+
+/// The title area of both windows is a standard toolbar, as in a Finder window: the title, the window's own few
+/// controls as ordinary toolbar items, nothing customisable and nothing that imitates Finder's navigation. The window
+/// keeps its standard titled style; the content (and the material behind it) still starts below the toolbar.
+final class WindowToolbar: NSObject, NSToolbarDelegate {
+    struct Entry {
+        let id: NSToolbarItem.Identifier, label: String, view: NSView?, navigational: Bool
+        init(_ id: String, _ label: String, _ view: NSView, navigational: Bool = false) { self.id = NSToolbarItem.Identifier(id); self.label = label; self.view = view; self.navigational = navigational }
+        private init() { id = .flexibleSpace; label = ""; view = nil; navigational = false }
+        static let space = Entry()
+    }
+    private let entries: [Entry]
+    let toolbar: NSToolbar
+
+    init(name: String, entries: [Entry]) {
+        self.entries = entries
+        toolbar = NSToolbar(identifier: name)
+        super.init()
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+    }
+
+    /// The window keeps the content size it was made with: the toolbar is added above the content, not taken out of it.
+    func install(in window: NSWindow) {
+        let content = window.contentRect(forFrameRect: window.frame).size
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
+        window.setContentSize(content)
+        window.center()
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { entries.map { $0.id } }
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] { entries.map { $0.id } }
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier id: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        guard let entry = entries.first(where: { $0.id == id }), let view = entry.view else { return nil }
+        let item = NSToolbarItem(itemIdentifier: id)
+        item.label = entry.label; item.paletteLabel = entry.label; item.toolTip = view.toolTip
+        item.view = view
+        item.isNavigational = entry.navigational                        // before the title, where a Finder window has Back
+        item.visibilityPriority = .high
+        return item
+    }
+}
+
+/// The background both windows share: a standard macOS material (a real NSVisualEffectView, blended behind the window),
+/// through which whatever is behind the window shows softly, blurred and tinted by macOS. Only this background is a
+/// material. The window keeps its standard title bar and buttons and is always at full strength (alpha 1), and
+/// everything on it (text, buttons, the preview, the tables) is laid OVER the material, not inside it, so it is drawn
+/// at full strength and the preview and the tables keep their own solid surfaces. The material covers the whole
+/// content area, so no part of the window is simply clear. The material follows light and dark, and goes plain while
+/// the window is not the active one, as macOS materials do.
+/// The window itself is kept an ordinary opaque window in its standard colour, in both states. That is measured, not
+/// assumed (tests/glass-shot.swift, over a striped test backdrop): in an opaque window the material does show what is
+/// behind the window, and the title bar stays solid; declared not opaque with a clear background, the same window's
+/// title bar turns clear and shows what is behind it unblurred.
+/// When "Reduce transparency" is on (System Settings › Accessibility › Display) the material is taken away and a
+/// plain plate in the window's own colour is shown instead; a change of that setting while the app runs is followed
+/// at once. The setting is only ever read. Nothing of the screen is looked at or captured: macOS draws the material.
+final class WindowBackdrop: NSView {
+    static let material = NSVisualEffectView.Material.sidebar
+    /// Whether macOS asks for less transparency. Only read; the tests put their own answer here instead of touching the setting.
+    static var reduceTransparency: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency }
+    let effect = NSVisualEffectView()
+    let plate = SolidPlate()
+    private var watch: NSObjectProtocol?
+
+    /// The plain background: the window's own colour, which is a different one in light and in dark.
+    final class SolidPlate: NSView {
+        override var isOpaque: Bool { true }
+        override func draw(_ dirtyRect: NSRect) { NSColor.windowBackgroundColor.setFill(); dirtyRect.fill() }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        effect.material = WindowBackdrop.material
+        effect.blendingMode = .behindWindow
+        effect.state = .followsWindowActiveState
+        for under in [plate, effect] as [NSView] {                       // both fill the window, under whatever is added later
+            under.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(under)
+            NSLayoutConstraint.activate([under.leadingAnchor.constraint(equalTo: leadingAnchor), under.trailingAnchor.constraint(equalTo: trailingAnchor), under.topAnchor.constraint(equalTo: topAnchor), under.bottomAnchor.constraint(equalTo: bottomAnchor)])
+        }
+        watch = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: nil) { [weak self] _ in
+            if Thread.isMainThread { self?.apply() } else { DispatchQueue.main.async { self?.apply() } }
+        }
+        apply()
+    }
+    required init?(coder: NSCoder) { return nil }
+    deinit { if let watch = watch { NSWorkspace.shared.notificationCenter.removeObserver(watch) } }
+
+    /// True while the material is in use; false while the plain plate is.
+    var showsThrough: Bool { !effect.isHidden }
+
+    /// One of the two is shown, never both: the material, or (with "Reduce transparency" on) the plain plate. The
+    /// window stays what it is in both: at full strength, opaque, in its standard colour (see above for why).
+    func apply() {
+        let plain = WindowBackdrop.reduceTransparency()
+        effect.isHidden = plain
+        plate.isHidden = !plain
+        guard let window = window else { return }
+        window.alphaValue = 1
+        window.isOpaque = true
+        window.backgroundColor = .windowBackgroundColor
+    }
+
+    /// Put into a window (or taken out of one): the window is set up for what is shown now.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        apply()
     }
 }
 

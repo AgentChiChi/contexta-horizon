@@ -954,6 +954,74 @@ func runSelfTest() -> Int32 {
           parsedDenied.reply == nil && parsedDenied.error == -1743 && parsedOdd.error == 0 && parsedOdd.reply == nil && parsedGood.reply == "a\nb" && MailAdapter.helperResult(status: 0, timedOut: true, output: Data("x".utf8), errors: Data()).error == -1712,
           "main=\(onMain) text=\(String(describing: helperText.reply)) denied=\(helperDenied.error) quit=\(helperQuit.error) slow=\(helperSlow.error) in \(slowTook)s")
 
+    // ── the shared window background: a material, or a plain plate when macOS asks for less transparency ──
+    // The app's reading of the setting is replaced here; the setting itself is never touched.
+    let liveReduce = WindowBackdrop.reduceTransparency
+    var asksLess = false, askedTimes = 0
+    WindowBackdrop.reduceTransparency = { askedTimes += 1; return asksLess }
+    let said = { NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil) }
+    func look(_ b: WindowBackdrop) -> String { (b.showsThrough ? "material" : "plain") + " effectHidden=\(b.effect.isHidden) plateHidden=\(b.plate.isHidden)" }
+    let pane = WindowBackdrop(), pane2 = WindowBackdrop()
+    let over = NSView(); pane.addSubview(over)                          // what a window lays on it
+    let made = look(pane)
+    asksLess = true; let unsaid = look(pane)                            // the answer changed but macOS has not said so: nothing polls
+    said(); let less = [look(pane), look(pane2)]
+    asksLess = false; said(); let more = [look(pane), look(pane2)]
+    autoreleasepool { let gone = WindowBackdrop(); _ = gone.showsThrough }       // one that is let go stops listening
+    let askedBefore = askedTimes; said(); let askedBy = askedTimes - askedBefore
+    // the window it is put into follows (this window is never put on screen)
+    func frame(_ w: NSWindow) -> String { "opaque=\(w.isOpaque) clear=\(w.backgroundColor == NSColor.clear) standard=\(w.backgroundColor == NSColor.windowBackgroundColor) alpha=\(w.alphaValue)" }
+    let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 120), styleMask: [.titled, .closable], backing: .buffered, defer: true)
+    host.isReleasedWhenClosed = false
+    let born = frame(host)
+    host.contentView = pane; let attached = frame(host)
+    asksLess = true; said(); let hostLess = frame(host)
+    asksLess = false; said(); let hostMore = frame(host)
+    asksLess = true; let late = WindowBackdrop(); host.contentView = late; let attachedLess = frame(host)      // attached while less transparency is asked for
+    asksLess = false; said()
+    host.isOpaque = false; host.backgroundColor = .clear; host.alphaValue = 0.5; said(); let putRight = frame(host)     // whatever it was made, it is set right
+    let hostWants = (material: "opaque=true clear=false standard=true alpha=1.0", plain: "opaque=true clear=false standard=true alpha=1.0")
+    WindowBackdrop.reduceTransparency = liveReduce
+    check("H65", "both windows share one background: a real NSVisualEffectView (sidebar material, blended behind the window, following the window's active state) with the window's content laid over it, not inside it; when macOS says its display options changed and \"Reduce transparency\" is on, the material is hidden and a plain plate shown, and back again when it is off — one of the two, never both, in every background at once, only when macOS says so, and a background that is let go stops listening; the window it is in is, in both states, at alpha 1, opaque and in the standard window colour — set when the background is attached (also with less transparency already asked for) and on each change, even if something had made the window clear, not opaque or faint",
+          pane.subviews.count == 3 && pane.subviews[0] === pane.plate && pane.subviews[1] === pane.effect && pane.subviews[2] === over && !over.isDescendant(of: pane.effect) &&
+          pane.effect.material == .sidebar && pane.effect.blendingMode == .behindWindow && pane.effect.state == .followsWindowActiveState && pane.plate.isOpaque &&
+          made == "material effectHidden=false plateHidden=true" && unsaid == made && less == Array(repeating: "plain effectHidden=true plateHidden=false", count: 2) && more == [made, made] && askedBy == 2 &&
+          born == hostWants.plain && attached == hostWants.material && hostLess == hostWants.plain && hostMore == hostWants.material && attachedLess == hostWants.plain && putRight == hostWants.material && frame(host) == hostWants.material,
+          "made=\(made) unsaid=\(unsaid) less=\(less) more=\(more) askedBy=\(askedBy) born=\(born) attached=\(attached) hostLess=\(hostLess) hostMore=\(hostMore) attachedLess=\(attachedLess) putRight=\(putRight) end=\(frame(host))")
+
+    // ── the shared look: this Mac's own regular and small metrics, a standard toolbar, lists in Finder's list-view density ──
+    let sysFamily = NSFont.systemFont(ofSize: NSFont.systemFontSize).familyName
+    let fontsSaid = [Style.body, Style.caption, Style.headline].map { "\($0.pointSize)" + (NSFontManager.shared.weight(of: $0) > 5 ? " heavy" : "") + ($0.familyName == sysFamily ? "" : " OTHER FAMILY") }
+    let native = NSTableView(), styled = NSTableView(); Style.list(styled)
+    let listSaid = "inset=\(styled.style == .inset) row=\(styled.rowHeight) spacing=\(styled.intercellSpacing.width)x\(styled.intercellSpacing.height) striped=\(styled.usesAlternatingRowBackgroundColors) grid=\(styled.gridStyleMask.isEmpty) one=\(!styled.allowsMultipleSelection)"
+    let narrow = Style.column("signal", "Direct / Inferred", width: 10), wide = Style.column("title", "Title", width: 140, flexible: true)
+    let lead = Style.cell(NSUserInterfaceItemIdentifier("topic"), primary: true), plainCell = Style.cell(NSUserInterfaceItemIdentifier("types"), primary: false)
+    let wrapped = Style.label("A caption", Style.caption, .secondaryLabelColor)
+    let barButton = NSButton(title: "Simple View", target: nil, action: nil), barOther = NSButton(title: "Read Sources", target: nil, action: nil)
+    barOther.toolTip = "Reads again"
+    let strip = WindowToolbar(name: "SelfTest", entries: [.init("back", "Simple View", barButton, navigational: true), .space, .init("read", "Read Sources", barOther)])
+    let backItem = strip.toolbar(strip.toolbar, itemForItemIdentifier: NSToolbarItem.Identifier("back"), willBeInsertedIntoToolbar: true)
+    let readItem = strip.toolbar(strip.toolbar, itemForItemIdentifier: NSToolbarItem.Identifier("read"), willBeInsertedIntoToolbar: true)
+    let shell = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: true)   // never put on screen
+    shell.isReleasedWhenClosed = false
+    let maskBefore = shell.styleMask
+    strip.install(in: shell)
+    let styleOk: Bool = Style.body.pointSize == NSFont.systemFontSize && Style.caption.pointSize == NSFont.smallSystemFontSize && fontsSaid == ["13.0", "11.0", "15.0 heavy"] && Style.margin == 20 && Style.spacing == 8
+    let listOk: Bool = listSaid == "inset=true row=24.0 spacing=17.0x0.0 striped=true grid=true one=true" && native.rowHeight == Style.rowHeight && native.intercellSpacing == Style.cellSpacing
+    let headerNeeds: CGFloat = narrow.headerCell.cellSize.width
+    let columnOk: Bool = narrow.width >= headerNeeds && narrow.minWidth >= headerNeeds && narrow.width > 10 && !narrow.resizingMask.contains(.autoresizingMask) && wide.width == 140 && wide.minWidth == 140 && wide.resizingMask.contains(.autoresizingMask)
+        && type(of: narrow.headerCell) == NSTableHeaderCell.self && narrow.headerCell.font?.pointSize == NSFont.smallSystemFontSize
+    let leadText = lead.textField, plainText = plainCell.textField
+    let cellOk: Bool = leadText?.font?.pointSize == 13 && leadText?.textColor == NSColor.labelColor && plainText?.textColor == NSColor.secondaryLabelColor && plainText?.lineBreakMode == NSLineBreakMode.byTruncatingTail && plainText?.isEditable == false
+        && wrapped.font?.pointSize == 11 && wrapped.cell?.wraps == true && !wrapped.isSelectable
+    let barIds: [String] = strip.toolbarDefaultItemIdentifiers(strip.toolbar).map { $0.rawValue }
+    let barOk: Bool = strip.toolbar.displayMode == .iconOnly && !strip.toolbar.allowsUserCustomization && !strip.toolbar.autosavesConfiguration && barIds == ["back", NSToolbarItem.Identifier.flexibleSpace.rawValue, "read"]
+        && backItem?.view === barButton && backItem?.isNavigational == true && readItem?.view === barOther && readItem?.isNavigational == false && readItem?.toolTip == "Reads again" && readItem?.label == "Read Sources"
+    let shellOk: Bool = shell.toolbar === strip.toolbar && shell.toolbarStyle == .unified && shell.styleMask == maskBefore && !shell.styleMask.contains(.fullSizeContentView) && shell.contentRect(forFrameRect: shell.frame).size == NSSize(width: 400, height: 300)
+    check("H66", "one shared set of styles, all asked of AppKit: regular text is the system's regular size (13), captions its small size (11), the one headline its third title size (15) in semibold, all in the system font; a list is inset, striped, without a grid, with 24-point rows 17 apart and none between — AppKit's own default row on this Mac; a column is never narrower than its title and only a flexible one takes spare room; a cell is one truncating line of regular text, the leading one in the label colour and the others secondary; the title area is a standard unified toolbar — icon-only mode, not customisable, nothing saved — whose items are the window's own controls with their tooltips, the way back placed before the title; installing it leaves the window's style and content size as they were",
+          styleOk && listOk && columnOk && cellOk && barOk && shellOk,
+          "fonts=\(fontsSaid) list=\(listSaid) native row=\(native.rowHeight) spacing=\(native.intercellSpacing) narrow=\(narrow.width)/\(narrow.headerCell.cellSize.width) content=\(shell.contentRect(forFrameRect: shell.frame).size)")
+
     // ── settings and manifest ──
     let store = MemoryStore(), prefs = Preferences(store: store)
     let d0 = prefs.months, on0 = prefs.enabled
@@ -1210,6 +1278,210 @@ func runSampleCheck(_ path: String) -> Int32 {
             var ds = dashboard.smokeState()
             expect("Sources & Settings opens the dashboard with every option, and one \"Read Sources\" button where \"Reread Sources\" and \"Collect from Mail…\" were (period, sources, read, imports, refresh)", dashboard.smokeWindow.isVisible && value(ds, "title") == "Contexta Horizon — Sources & Settings" && value(ds, "period").hasSuffix("[3 months,6 months,Custom]") && value(ds, "buttons") == "Read Sources,Import…,Refresh Feeds…,Open in Simple View" && value(ds, "topics") == "2", ds)
             _ = picture(dashboard.smokeWindow, URL(fileURLWithPath: out).lastPathComponent)
+            // 6g. the background of both windows: a real material behind the window, and a plain plate when "Reduce transparency" is on.
+            //     The app's reading of that setting is replaced for the test; the setting itself is never touched.
+            let systemReduce = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+            let liveReduce = WindowBackdrop.reduceTransparency
+            let announce = { NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil) }
+            let both: [(String, NSWindow)] = [("the simple window", simple.smokeWindow), ("Sources & Settings", dashboard.smokeWindow)]
+            func everything(_ v: NSView) -> [NSView] { v.subviews.flatMap { [$0] + everything($0) } }
+            /// What a window's background is made of, and what lies on it.
+            func made(_ w: NSWindow) -> [String] {
+                guard let b = w.contentView as? WindowBackdrop, b.subviews.count == 3 else { return ["background=missing"] }
+                let content = b.subviews[2], laid = everything(content)
+                // every control and surface the window lays on the background is at full strength, counting everything it sits in up to the
+                // background (a scroll bar, which macOS fades out while idle, and AppKit's own parts inside a scroll view are not the window's content)
+                func strength(_ v: NSView) -> CGFloat { var a = v.alphaValue, up = v.superview; while let s = up { a *= s.alphaValue; if s === b { break }; up = s.superview }; return a }
+                let own = laid.filter { ($0 is NSControl || $0 is NSBox || $0 is NSStackView || $0 is NSScrollView || $0 is NSClipView || $0 is NSSplitView || $0 is NSTextView || $0 is NSProgressIndicator) && !($0 is NSScroller) }
+                let faint = own.filter { strength($0) != 1 }
+                let previews = laid.compactMap { $0 as? NSBox }.filter { $0.boxType == .custom && $0.fillColor == NSColor.textBackgroundColor && $0.borderWidth == 1 }.count
+                let tables = laid.compactMap { $0 as? NSScrollView }.filter { ($0.documentView as? NSTableView).map { t in t.backgroundColor.alphaComponent == 1 } == true && $0.drawsBackground }.count
+                let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].filter { w.standardWindowButton($0)?.isHidden == false }.count
+                return ["order=" + (b.subviews[0] === b.plate && b.subviews[1] === b.effect ? "plate,material,content" : "other"),
+                        "material=" + (b.effect.material == .sidebar ? "sidebar" : "other") + " behindWindow=\(b.effect.blendingMode == .behindWindow) followsActive=\(b.effect.state == .followsWindowActiveState)",
+                        "shown=" + (b.showsThrough ? "material" : "plain") + " materialHidden=\(b.effect.isHidden) plateHidden=\(b.plate.isHidden)",
+                        "contentOver=\(!content.isDescendant(of: b.effect) && b.effect.subviews.allSatisfy { !($0 is NSControl) }) fullStrength=\(faint.isEmpty && b.alphaValue == 1)" + (faint.isEmpty ? "" : " faint=" + Set(faint.map { String(describing: type(of: $0)) }).sorted().joined(separator: ",")) + " laid=\(own.count > 10)",
+                        "window opaque=\(w.isOpaque) clear=\(w.backgroundColor == NSColor.clear) standardColour=\(w.backgroundColor == NSColor.windowBackgroundColor) alpha=\(w.alphaValue) titled=\(w.styleMask.contains(.titled)) fullSize=\(w.styleMask.contains(.fullSizeContentView)) clearTitleBar=\(w.titlebarAppearsTransparent) buttons=\(buttons)",
+                        "surfaces preview=\(previews) tables=\(tables)"]
+            }
+            func wanted(_ shown: String, preview: Int, tables: Int) -> [String] {
+                ["order=plate,material,content", "material=sidebar behindWindow=true followsActive=true", shown, "contentOver=true fullStrength=true laid=true",
+                 "window opaque=true clear=false standardColour=true alpha=1.0 titled=true fullSize=false clearTitleBar=false buttons=3", "surfaces preview=\(preview) tables=\(tables)"]
+            }
+            /// The brightness of the background as it is drawn, at a point near the top left corner where nothing else is.
+            func ground(_ w: NSWindow) -> CGFloat {
+                guard let view = w.contentView else { return -1 }
+                view.layoutSubtreeIfNeeded(); view.needsDisplay = true
+                guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return -1 }
+                view.cacheDisplay(in: view.bounds, to: rep)
+                return rep.colorAt(x: 5, y: 5)?.usingColorSpace(.deviceRGB)?.brightnessComponent ?? -1
+            }
+            let materialSaid = "shown=material materialHidden=false plateHidden=true", plainSaid = "shown=plain materialHidden=true plateHidden=false"
+            WindowBackdrop.reduceTransparency = { false }; announce()
+            simple.smokeType("Follow up on the Harborline quote")
+            let glassSimple = simple.smokeState(), glassDash = dashboard.smokeState()
+            expect("both windows have the same kind of background: a sidebar material blended behind the window that follows the window's active state, with the content laid over it at full strength (not inside it); the window itself is at alpha 1, opaque, in its standard colour, with its standard title bar and three buttons; the preview and the two tables keep their own solid surfaces",
+                   made(simple.smokeWindow) == wanted(materialSaid, preview: 1, tables: 0) && made(dashboard.smokeWindow) == wanted(materialSaid, preview: 0, tables: 2), made(simple.smokeWindow) + made(dashboard.smokeWindow))
+            _ = picture(simple.smokeWindow, "glass-simple-material.png"); _ = picture(dashboard.smokeWindow, "glass-dashboard-material.png")
+            WindowBackdrop.reduceTransparency = { true }; announce()
+            expect("when macOS says \"Reduce transparency\" is on, both windows switch at once to the plain background: the material is hidden; each window is as before — opaque, in its standard colour, at alpha 1, with its title bar and buttons",
+                   made(simple.smokeWindow) == wanted(plainSaid, preview: 1, tables: 0) && made(dashboard.smokeWindow) == wanted(plainSaid, preview: 0, tables: 2), made(simple.smokeWindow) + made(dashboard.smokeWindow))
+            expect("the switch leaves the work alone: the typed task, its preview, the chosen topic and the focus in the simple window, and everything in Sources & Settings, are as they were",
+                   simple.smokeState() == glassSimple && dashboard.smokeState() == glassDash && value(glassSimple, "simple.query") == "Follow up on the Harborline quote" && value(glassSimple, "simple.preview").hasPrefix("Task: Follow up on the Harborline quote\n") && value(glassSimple, "simple.copyEnabled") == "true", simple.smokeState())
+            simple.smokeType("compare harborline and atlas"); simple.smokePick(1)
+            var gs = simple.smokeState()
+            expect("on the plain background the window works as before: another task is typed and another topic picked", value(gs, "simple.suggestions") == "Harborline · 4 | Atlas · 2*" && value(gs, "simple.preview").hasPrefix("Task: compare harborline and atlas\n") && value(gs, "simple.copyCount") == "0", gs)
+            simple.smokePick(0); simple.smokeType("Follow up on the Harborline quote")
+            var grounds: [String] = []
+            for (name, w) in both {
+                let file = name == "the simple window" ? "simple" : "dashboard"
+                w.appearance = NSAppearance(named: .aqua); let light = ground(w); _ = picture(w, "glass-\(file)-plain-light.png")
+                w.appearance = NSAppearance(named: .darkAqua); let dark = ground(w); _ = picture(w, "glass-\(file)-plain-dark.png")
+                let followed = (w.contentView as? WindowBackdrop).map { $0.effect.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua && $0.plate.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua } == true
+                WindowBackdrop.reduceTransparency = { false }; announce()
+                let darkMaterial = made(w)[2] == materialSaid; _ = picture(w, "glass-\(file)-material-dark.png")
+                WindowBackdrop.reduceTransparency = { true }; announce()
+                w.appearance = nil
+                grounds.append("\(name): light=\(light) dark=\(dark)")
+                expect("\(name): the plain background is the window's own colour, light in a light window and dark in a dark one, and the material follows a dark window too", light > 0.8 && dark >= 0 && dark < 0.3 && followed && darkMaterial && made(w)[2] == plainSaid, [grounds.last ?? ""] + made(w))
+            }
+            WindowBackdrop.reduceTransparency = { false }; announce()
+            gs = simple.smokeState()
+            expect("when \"Reduce transparency\" goes off again the material is back in both windows (still opaque, standard colour, alpha 1), with the same task, preview and focus", made(simple.smokeWindow) == wanted(materialSaid, preview: 1, tables: 0) && made(dashboard.smokeWindow) == wanted(materialSaid, preview: 0, tables: 2) && gs == glassSimple && dashboard.smokeState() == glassDash, gs)
+            WindowBackdrop.reduceTransparency = liveReduce; announce()
+            simple.smokeType("")
+            expect("the test only replaced the app's reading of the setting: macOS's own \"Reduce transparency\" is what it was, and the simple window is back where this step found it", NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency == systemReduce && simple.smokeState() == st, simple.smokeState())
+            // 6h. the look, measured on the live windows: this Mac's regular and small control metrics, a standard toolbar as the title
+            //     area, lists in the density of Finder's list view — and nothing clipped at the default or the smallest size.
+            let regular = NSFont.systemFontSize, small = NSFont.smallSystemFontSize, headlineSize = NSFont.preferredFont(forTextStyle: .title3).pointSize
+            let family = NSFont.systemFont(ofSize: regular).familyName ?? ""
+            let lookSimple = simple.smokeState(), lookDash = dashboard.smokeState()
+            simple.smokeType("Follow up on the Harborline quote")
+            _ = dashboard.smokeSelect(key: "harborline")                      // so that both lists have rows
+            func laidOn(_ w: NSWindow) -> NSView? { (w.contentView as? WindowBackdrop)?.subviews.last }
+            func barViews(_ w: NSWindow) -> [NSView] { (w.toolbar?.items ?? []).compactMap { $0.view } }
+            func within<V: NSView>(_ v: NSView, _ kind: V.Type) -> Bool { var up = v.superview; while let s = up { if s is V { return true }; up = s.superview }; return false }
+            /// Every piece of text a window shows outside its lists — in its content and in its toolbar — with its font.
+            func texts(_ w: NSWindow) -> [(what: String, font: NSFont, view: NSView)] {
+                var out: [(what: String, font: NSFont, view: NSView)] = []
+                let all = (laidOn(w).map { everything($0) } ?? []) + barViews(w).flatMap { [$0] + everything($0) }
+                for v in all where !v.isHiddenOrHasHiddenAncestor && !within(v, NSTableView.self) && !within(v, NSTableHeaderView.self) && !within(v, NSControl.self) {
+                    if let t = v as? NSTextField, let f = t.font { out.append(((t.isEditable ? "field:" : "label:") + String(t.stringValue.prefix(40)), f, t)) }
+                    else if let b = v as? NSButton, let f = b.font { out.append(("button:" + b.title, f, b)) }
+                    else if let c = v as? NSControl, c is NSSegmentedControl || c is NSDatePicker, let f = c.font { out.append((c is NSDatePicker ? "date" : "segments", f, c)) }
+                    else if let t = v as? NSTextView, let f = t.font { out.append(("text", f, t)) }
+                }
+                return out
+            }
+            func heavy(_ f: NSFont) -> Bool { NSFontManager.shared.weight(of: f) > 5 }
+            /// Text that is not the system font at the regular, the small or the headline size, or whose size does not fit its role.
+            func odd(_ w: NSWindow, headline: String?) -> [String] {
+                texts(w).compactMap { t in
+                    let size = t.font.pointSize, label = t.view as? NSTextField
+                    var want = regular
+                    if let h = headline, t.what == "label:" + h { want = headlineSize }
+                    else if let l = label, !l.isEditable, l.textColor == NSColor.secondaryLabelColor { want = small }          // secondary captions are small
+                    else if let b = t.view as? NSButton, b.controlSize == .small { want = small }
+                    let ok = t.font.familyName == family && size == want && heavy(t.font) == (want == headlineSize) && ((t.view as? NSControl)?.controlSize ?? .regular) != .large && ((t.view as? NSControl)?.controlSize ?? .regular) != .mini
+                    return ok ? nil : "\(t.what): \(t.font.fontName) \(size), wanted \(want)"
+                }
+            }
+            let simpleTexts = texts(simple.smokeWindow), dashTexts = texts(dashboard.smokeWindow)
+            let sizes: ([(what: String, font: NSFont, view: NSView)]) -> String = { all in Dictionary(grouping: all, by: { $0.font.pointSize }).map { "\($0.key)pt ×\($0.value.count)" }.sorted().joined(separator: ", ") }
+            print("        measured: regular \(regular), small \(small), headline \(headlineSize); simple window text: \(sizes(simpleTexts)); Sources & Settings text: \(sizes(dashTexts))")
+            expect("type: every piece of text in both windows is the system font at this Mac's regular size (13), its small size (11) for secondary captions, or — once, for the simple window's question — a compact semibold headline (15) where the 22-point one was; the task field, the preview and every button are regular; no control is large or mini",
+                   regular == 13 && small == 11 && headlineSize == 15 && odd(simple.smokeWindow, headline: "What do you want to continue?").isEmpty && odd(dashboard.smokeWindow, headline: nil).isEmpty &&
+                   simpleTexts.filter { $0.font.pointSize == headlineSize }.count == 1 && simpleTexts.contains { $0.what.hasPrefix("field:") && $0.font.pointSize == regular } && simpleTexts.contains { $0.what == "text" && $0.font.pointSize == regular } &&
+                   simpleTexts.contains { $0.what == "button:Copy" && ($0.view as? NSButton)?.controlSize == .regular } && simpleTexts.filter { $0.font.pointSize == small }.count >= 2 && dashTexts.filter { $0.font.pointSize == small }.count >= 6 && simpleTexts.count >= 6 && dashTexts.count >= 14,
+                   odd(simple.smokeWindow, headline: "What do you want to continue?") + odd(dashboard.smokeWindow, headline: nil) + simpleTexts.map { $0.what } + dashTexts.map { $0.what })
+            /// The title area: a standard toolbar and what is in it.
+            func bar(_ w: NSWindow) -> String {
+                guard let t = w.toolbar else { return "no toolbar" }
+                let items = t.items.map { i -> String in
+                    let shown = (i.view as? NSButton)?.title ?? (i.view as? NSSegmentedControl).map { s in (0..<s.segmentCount).map { s.label(forSegment: $0) ?? "" }.joined(separator: "/") } ?? "space"
+                    return i.itemIdentifier.rawValue + "=" + shown + (i.isNavigational ? " (before the title)" : "")
+                }
+                return "unified=\(w.toolbarStyle == .unified) customisable=\(t.allowsUserCustomization) shown=\(t.visibleItems?.count ?? -1)/\(t.items.count) [" + items.joined(separator: ", ") + "] title=" + w.title + " titleShown=\(w.titleVisibility == .visible)"
+            }
+            let barSimple = bar(simple.smokeWindow), barDash = bar(dashboard.smokeWindow)
+            expect("title area: each window has a standard unified toolbar that shows the window's title, is not customisable and holds only the window's own controls — Sources & Settings in the simple window; Simple View before the title, then the period and Read Sources, Import…, Refresh Feeds… in Sources & Settings — and the content no longer repeats the title as a header",
+                   barSimple == "unified=true customisable=false shown=2/2 [NSToolbarFlexibleSpaceItem=space, settings=Sources & Settings] title=Contexta Horizon titleShown=true" &&
+                   barDash == "unified=true customisable=false shown=6/6 [back=Simple View (before the title), period=3 months/6 months/Custom, NSToolbarFlexibleSpaceItem=space, read=Read Sources, import=Import…, refresh=Refresh Feeds…] title=Contexta Horizon — Sources & Settings titleShown=true" &&
+                   !dashTexts.contains { $0.what == "label:Sources & Settings" } && !simpleTexts.contains { $0.what == "label:Contexta Horizon" }, [barSimple, barDash])
+            /// A list as it is on screen: its density, its header and its cells.
+            func list(_ table: NSTableView) -> String {
+                guard table.numberOfRows > 0 else { return "no rows" }
+                let cells = (0..<table.numberOfColumns).compactMap { table.view(atColumn: $0, row: 0, makeIfNecessary: true) as? NSTableCellView }
+                cells.forEach { $0.layoutSubtreeIfNeeded() }
+                let leading = Set(["topic", "title"])
+                let colours = cells.allSatisfy { c in c.textField?.textColor == (leading.contains(c.identifier?.rawValue ?? "") ? NSColor.labelColor : NSColor.secondaryLabelColor) }
+                let centred = cells.allSatisfy { c in c.textField.map { abs($0.frame.midY - c.bounds.midY) <= 1 } == true }
+                let header = table.headerView != nil && table.tableColumns.allSatisfy { type(of: $0.headerCell) == NSTableHeaderCell.self && $0.headerCell.font?.pointSize == small }
+                return "style=" + (table.style == .inset ? "inset" : "other") + " rowHeight=\(table.rowHeight) pitch=\(table.rect(ofRow: 0).height) spacing=\(table.intercellSpacing.width)x\(table.intercellSpacing.height) striped=\(table.usesAlternatingRowBackgroundColors) grid=\(table.gridStyleMask.isEmpty ? "none" : "lines") standardHeader11=\(header) cells=\(cells.count) cellFont=\(Set(cells.compactMap { $0.textField?.font?.pointSize }).sorted()) systemFont=\(cells.allSatisfy { $0.textField?.font?.familyName == family }) leadingLabelOthersSecondary=\(colours) centred=\(centred) selection=\(table.selectionHighlightStyle == .regular ? "standard" : "other")"
+            }
+            let tables = (laidOn(dashboard.smokeWindow).map { everything($0) } ?? []).compactMap { $0 as? NSTableView }
+            let lists = tables.map { list($0) }
+            func wantedList(_ columns: Int) -> String { "style=inset rowHeight=24.0 pitch=24.0 spacing=17.0x0.0 striped=true grid=none standardHeader11=true cells=\(columns) cellFont=[13.0] systemFont=true leadingLabelOthersSecondary=true centred=true selection=standard" }
+            expect("lists: the topics and the evidence are in the density of Finder's list view — inset style, 24-point rows with no gap between them, stripes, no grid, the standard 11-point header, regular 13-point cells centred in their rows, the leading column in the label colour and the others secondary, standard selection",
+                   lists == [wantedList(5), wantedList(6)] && NSTableView().rowHeight == 24, lists)
+            /// Insets and spacing: the content starts one standard margin from every edge.
+            func edges(_ w: NSWindow) -> String {
+                guard let root = w.contentView, let stack = laidOn(w) as? NSStackView else { return "no stack" }
+                w.layoutIfNeeded()
+                // measured where each row is aligned (a button's or a checkbox's frame reaches a little past its visible edge)
+                let boxes = stack.arrangedSubviews.filter { !$0.isHidden }.map { v in stack.convert(v.alignmentRect(forFrame: v.frame), to: root) }
+                let i = stack.edgeInsets
+                return "insets=\(i.top),\(i.left),\(i.bottom),\(i.right) spacing=\(stack.spacing) left=\(boxes.map { $0.minX }.min() ?? -1) right=\((root.bounds.maxX - (boxes.map { $0.maxX }.max() ?? 0)).rounded()) top=\((root.bounds.maxY - (boxes.map { $0.maxY }.max() ?? 0)).rounded()) bottom=\((boxes.map { $0.minY }.min() ?? -1).rounded()) allStartAtMargin=\(boxes.allSatisfy { $0.minX == 20 })"
+            }
+            let wantedEdges = "insets=20.0,20.0,20.0,20.0 spacing=8.0 left=20.0 right=20.0 top=20.0 bottom=20.0 allStartAtMargin=true"
+            expect("spacing: both windows use the same compact measure — content one standard 20-point margin from every edge, 8 points between rows, every row starting at the margin (an idle spinner takes no room)",
+                   edges(simple.smokeWindow) == wantedEdges && edges(dashboard.smokeWindow) == wantedEdges, [edges(simple.smokeWindow), edges(dashboard.smokeWindow)])
+            /// What is cut off: a button or the period control narrower than its title needs, a label with less room than its text,
+            /// anything outside the window, a toolbar item pushed into the overflow menu, a list column narrower than its title.
+            func clipped(_ w: NSWindow) -> [String] {
+                guard let root = w.contentView, let on = laidOn(w) else { return ["no content"] }
+                w.layoutIfNeeded(); root.layoutSubtreeIfNeeded()
+                var out: [String] = []
+                for t in texts(w) {
+                    let size = t.view.frame.size
+                    if let c = t.view as? NSControl, c is NSButton || c is NSSegmentedControl || c is NSDatePicker || (c as? NSTextField)?.isEditable == true {
+                        let need = c.intrinsicContentSize
+                        if (need.width > 0 && size.width + 0.5 < need.width) || size.height + 0.5 < need.height { out.append("\(t.what): has \(size), needs \(need)") }
+                    } else if let l = t.view as? NSTextField, !l.stringValue.isEmpty, let cell = l.cell {
+                        let need = cell.wraps ? cell.cellSize(forBounds: NSRect(x: 0, y: 0, width: size.width, height: 10_000)) : cell.cellSize
+                        if size.width + 0.5 < need.width || size.height + 0.5 < need.height { out.append("\(t.what): has \(size), needs \(need)") }
+                    }
+                    if t.view.isDescendant(of: on), !root.bounds.insetBy(dx: -0.5, dy: -0.5).contains(t.view.convert(t.view.bounds, to: root)) { out.append("\(t.what): outside the window") }
+                }
+                if let bar = w.toolbar, bar.visibleItems?.count != bar.items.count { out.append("toolbar: \(bar.items.count - (bar.visibleItems?.count ?? 0)) item(s) pushed into the overflow menu") }
+                for table in everything(on).compactMap({ $0 as? NSTableView }) { for c in table.tableColumns where c.width + 0.5 < c.headerCell.cellSize.width { out.append("column \(c.title): \(c.width) wide, its title needs \(c.headerCell.cellSize.width)") } }
+                return out
+            }
+            /// Lists that are wider than the room they have (they scroll sideways rather than squeeze their columns).
+            func sideways(_ w: NSWindow) -> [Bool] { (laidOn(w).map { everything($0) } ?? []).compactMap { $0 as? NSTableView }.map { t in t.frame.width > (t.enclosingScrollView?.contentView.bounds.width ?? 0) + 0.5 } }
+            let frames = both.map { $0.1.frame }
+            let atDefault = both.map { clipped($0.1) }, defaultSizes = both.map { $0.1.contentView?.frame.size ?? .zero }
+            let scrollDefault = sideways(dashboard.smokeWindow)
+            let room: (NSTableView) -> String = { t in let has: CGFloat = t.enclosingScrollView?.contentView.bounds.width ?? 0; return "\(t.frame.width) wide in \(has)" }
+            let columnNotes: [String] = tables.flatMap { t in t.tableColumns.map { c in "\(c.title) \(c.width)≥\(c.headerCell.cellSize.width)" } }
+            let roomNotes: [String] = tables.map { room($0) }
+            print("        measured at the default sizes \(defaultSizes): lists " + roomNotes.joined(separator: ", ") + "; columns " + columnNotes.joined(separator: ", "))
+            expect("at the default sizes (680 × 560 and 1280 × 700) nothing is clipped in either window: every button, the period control and every toolbar item has the room its title needs, every label has room for its text, every list column is at least as wide as its title, and neither list needs to scroll sideways",
+                   defaultSizes == [NSSize(width: 680, height: 560), NSSize(width: 1280, height: 700)] && atDefault.allSatisfy { $0.isEmpty } && scrollDefault == [false, false], atDefault.flatMap { $0 } + ["sideways=\(scrollDefault)"])
+            for (_, w) in both { w.setContentSize(w.contentMinSize); w.layoutIfNeeded() }
+            let atMin = both.map { clipped($0.1) }, reached = both.map { $0.1.contentView?.frame.size == $0.1.contentMinSize }, scrollMin = sideways(dashboard.smokeWindow)
+            let scrollers = tables.allSatisfy { $0.enclosingScrollView?.hasHorizontalScroller == true }
+            let minWidths: [CGFloat] = tables.map { $0.enclosingScrollView?.frame.width ?? 0 }                       // both lists keep a usable width
+            let titleKept: Bool = tables.last?.tableColumns.first { $0.identifier.rawValue == "title" }.map { $0.width >= 140 } == true    // the evidence title is not squeezed away
+            _ = picture(simple.smokeWindow, "finder-simple-minimum.png"); _ = picture(dashboard.smokeWindow, "finder-dashboard-minimum.png")
+            print("        measured at the smallest sizes \(both.map { $0.1.contentView?.frame.size ?? .zero }): lists \(minWidths) wide, scroll sideways \(scrollMin)")
+            expect("at the smallest content sizes the windows allow (520 × 460 and 960 × 560) nothing is clipped either: buttons, labels and toolbar items keep their room, and a list that no longer fits keeps its columns as wide as their titles and scrolls sideways instead",
+                   both.map { $0.1.contentMinSize } == [NSSize(width: 520, height: 460), NSSize(width: 960, height: 560)] && reached == [true, true] && atMin.allSatisfy { $0.isEmpty } && scrollers && scrollMin == [true, true] && minWidths.allSatisfy { $0 >= 320 } && titleKept && sideways(simple.smokeWindow).isEmpty, atMin.flatMap { $0 } + ["reached=\(reached) sideways=\(scrollMin)"])
+            for (i, pair) in both.enumerated() { pair.1.setFrame(frames[i], display: true); pair.1.layoutIfNeeded() }
+            _ = picture(simple.smokeWindow, "finder-simple.png"); _ = picture(dashboard.smokeWindow, "finder-dashboard.png")
+            let backToDefault = both.map { clipped($0.1) }
+            dashboard.smokeDeselect(); simple.smokeType("")
+            expect("back at the default sizes everything fits again, and the measuring left both windows as it found them", backToDefault.allSatisfy { $0.isEmpty } && sideways(dashboard.smokeWindow) == [false, false] && simple.smokeState() == lookSimple && dashboard.smokeState() == lookDash, backToDefault.flatMap { $0 } + simple.smokeState())
             let cal = Calendar.current
             dashboard.smokeApplyCustom(start: now.addingTimeInterval(-30 * 86400), end: now.addingTimeInterval(-9 * 86400))
             ds = dashboard.smokeState()
@@ -1217,6 +1489,7 @@ func runSampleCheck(_ path: String) -> Int32 {
             st = simple.smokeState()
             expect("a custom period applies in the dashboard and the simple screen follows it at once", value(ds, "window") == customLabel && value(ds, "customRow").hasPrefix("shown feedback=Applied: ") && value(ds, "source.mail").hasPrefix("Mail: 0 in this period (2 total)") && value(st, "simple.caption").hasPrefix("Period: Custom · ") && value(st, "simple.preview").hasPrefix("Topic: Harborline · " + String(customLabel.dropFirst("Period: Custom · ".count).prefix(23)) + " (both days included) · titles are signals, not proof of completed work") && value(st, "simple.preview").split(separator: "\n").count == 4 && !value(st, "simple.preview").contains("Mail"), ds + st)
             _ = picture(dashboard.smokeWindow, "window-custom-synthetic.png")
+            expect("with the custom period's row on screen (two date fields, Apply and its feedback) nothing is clipped", clipped(dashboard.smokeWindow).isEmpty, clipped(dashboard.smokeWindow))
             for (name, s, e, want) in [("reversed", -5.0, -9.0, "is after the end date"), ("future", -5.0, 3.0, "is in the future"), ("longer than six months", -200.0, -1.0, "The period is longer than 6 months")] {
                 dashboard.smokeApplyCustom(start: now.addingTimeInterval(s * 86400), end: now.addingTimeInterval(e * 86400))
                 ds = dashboard.smokeState()
@@ -1261,7 +1534,9 @@ func runSampleCheck(_ path: String) -> Int32 {
             dashboard.smokeBack()
             st = simple.smokeState()
             expect("\"Simple View\" shows the simple screen again; through the whole run nothing was copied", simple.smokeWindow.isVisible && value(st, "simple.copyCount") == "0", st)
-            var pictures = ["loading-simple.png", "loading-dashboard.png", "menu-glyph-in-app.png", "simple-1-start.png", "simple-2-typed.png", "simple-3-picked.png", "simple-4-no-match.png", "simple-5-back-from-settings.png", "window-custom-synthetic.png", URL(fileURLWithPath: out).lastPathComponent]
+            var pictures = ["loading-simple.png", "loading-dashboard.png", "menu-glyph-in-app.png", "simple-1-start.png", "simple-2-typed.png", "simple-3-picked.png", "simple-4-no-match.png", "simple-5-back-from-settings.png", "window-custom-synthetic.png", URL(fileURLWithPath: out).lastPathComponent,
+                            "glass-simple-material.png", "glass-dashboard-material.png", "glass-simple-plain-light.png", "glass-simple-plain-dark.png", "glass-simple-material-dark.png", "glass-dashboard-plain-light.png", "glass-dashboard-plain-dark.png", "glass-dashboard-material-dark.png",
+                            "finder-simple.png", "finder-dashboard.png", "finder-simple-minimum.png", "finder-dashboard-minimum.png"]
             let finish: () -> Never = {
                 expect("pictures saved: " + pictures.joined(separator: ", "), pictures.allSatisfy { fm.fileExists(atPath: folder.appendingPathComponent($0).path) })
                 try? fm.removeItem(at: temp)

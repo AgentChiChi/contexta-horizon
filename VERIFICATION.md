@@ -1,4 +1,12 @@
-# Verifying Horizon 0.5.4 (build 11)
+# Verifying Horizon 0.5.6 (build 13)
+
+The tested arm64 app passed 66/66 synthetic self-tests, 21/21 static checks and 79 native-window steps. The installed CLI passed 32 synthetic lookups across all 16 source-switch combinations. The final executable SHA-256 is `59dac41ff97d7a67d9325332ee1723f184d0a797afcc9b9253436c2f95d3997f`.
+
+On the test Mac, both windows used 13-point system text, 11-point list headers and 24-point rows. At default widths both lists fit; at minimum width they can scroll sideways without narrowing a column below its header. The compositing test used a synthetic colored background, light and dark appearances and a simulated Reduce transparency switch. No live Mail collection or real permission prompt was tested. The measurements are not a pixel-for-pixel Finder comparison or verification on every supported macOS version.
+
+Known test limitation: five older checks may fail in the first ten minutes after local midnight because two fictional turns intended to share a date can land on different days. The same issue was observed in the prior build. This is not evidence of a change to how real records are grouped.
+
+## Previous release: 0.5.4 (build 11)
 
 This is a Finder palette update, not a change in app behavior. The plate is Index Yellow (`#F4D447`) and the mark is dark ink (`#20231F`). The canonical path, corner radius, margins and menu template are unchanged. The generated icon is bundled as `Contents/Resources/AppIcon.icns`.
 
