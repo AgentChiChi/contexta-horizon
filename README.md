@@ -1,16 +1,16 @@
-<img src="docs/media/horizon-c-icon.png" alt="Contexta Horizon: a mint -C- on dark ink" width="96" height="96">
+<img src="docs/media/horizon-c-icon.png" alt="Contexta Horizon: a dark -C- on Index Yellow" width="96" height="96">
 
 # Contexta Horizon for Mac
 
 **New chat. Same project.** Pick up the thread in ChatGPT, Claude or Aside without pasting your entire history. Horizon brings dated references from your local file lists, earlier AI chats and mail into one Mac menu bar preview. You decide which conversation gets them.
 
-**[Download for Apple Silicon](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/Contexta-Horizon-0.5.3-macOS-arm64.zip)** · [Get started](GUIDE.md) · [0.5.3 release](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.3)
+**[Download for Apple Silicon](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.4/Contexta-Horizon-0.5.4-macOS-arm64.zip)** · [Get started](GUIDE.md) · [0.5.4 release](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.4)
 
 macOS 13+ · Apple Silicon · **Public preview, ad-hoc signed and not Apple-notarized.** If your Mac blocks it, leave Gatekeeper enabled. See the [installation guide](GUIDE.md).
 
-### What’s new in 0.5.3
+### The Index Yellow icon · 0.5.4
 
-Look for **-C-** in your menu bar: the left line meets Contexta’s C, and the line on the right picks up the thread. [Finder and menu bar icon previews](Icon/icon-preview.png) · [Vector source](Icon/mark.svg)
+Look for the yellow tile in Finder, like an index tab marking where you left off. The plate is Index Yellow (`#F4D447`), the mark is dark ink (`#20231F`), and the menu bar keeps its monochrome **-C-**: the left line meets Contexta’s C, and the line on the right picks up the thread. [Finder and menu bar icon previews](Icon/icon-preview.png) · [Vector source](Icon/mark.svg)
 
 Open Horizon and start typing while your sources load. Reopening the window joins the read already in progress instead of starting over. In **Sources & Settings**, **Read Sources** replaces the two old read buttons. It starts with local sources; adding recent subjects and dates from an already-open Mail app requires your confirmation. [When Mail is offered](GUIDE.md#what-a-source-switch-does)
 
@@ -30,7 +30,7 @@ Horizon shows you the dates and source types. It doesn't read a contract and dec
 
 1. Open Horizon on a fresh install. In the empty view with nothing typed, choose **Try a fictional example**. No sign-in, mailbox import or model needed for the demo.
 2. Inspect the Harborline references, then choose **Exit example**. The demo lives in memory. **Copy is off**, and the example doesn't become one of your projects.
-3. To try the actual handoff without personal data, import the [fictional mailbox](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/sample-mail.mbox) from **Sources & Settings → Import…**. Return to the simple view and type **“Follow up on the Harborline quote.”**
+3. To try the actual handoff without personal data, import the [fictional mailbox](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.4/sample-mail.mbox) from **Sources & Settings → Import…**. Return to the simple view and type **“Follow up on the Harborline quote.”**
 
 ### Two ways to resume work
 

@@ -11,7 +11,8 @@
 import AppKit
 
 @main struct MakeIcon {
-    static let plateHex = "#172a32", markHex = "#79e2bd"                 // flat, solid, both at full strength
+    static let indexYellow = "#F4D447"                                   // the plate: Index Yellow, flat and solid
+    static let markInk = "#20231F"                                       // the mark: ink, flat and solid, at full strength
     static let tile: CGFloat = 112, corner: CGFloat = 25                 // the approved tile …
     static let markBox = CGRect(x: 12.5, y: 20, width: 87, height: 72)   // … and the mark's 87 by 72 box, centred in it
     static let space = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -27,16 +28,16 @@ import AppKit
         return c.makeImage()!
     }
 
-    /// The Finder icon at `px` pixels: the tile, as large as the macOS icon margins allow (824 of 1024), in flat ink
-    /// with the mark in flat mint.
+    /// The Finder icon at `px` pixels: the tile, as large as the macOS icon margins allow (824 of 1024), in flat Index
+    /// Yellow with the mark in flat ink.
     static func appIcon(_ px: Int) -> CGImage {
         bitmap(px, px) { c in
             let s = CGFloat(px) / 1024, plate = CGRect(x: 100 * s, y: 100 * s, width: 824 * s, height: 824 * s), u = plate.width / tile
-            c.setFillColor(color(plateHex))
+            c.setFillColor(color(indexYellow))
             c.addPath(CGPath(roundedRect: plate, cornerWidth: corner * u, cornerHeight: corner * u, transform: nil)); c.fillPath()
             // the mark's box in the tile (the tile's y runs down, the bitmap's up; the box is centred, so it is the same)
             let box = CGRect(x: plate.minX + markBox.minX * u, y: plate.minY + (tile - markBox.maxY) * u, width: markBox.width * u, height: markBox.height * u)
-            ThreadGlyph.draw(in: c, rect: box, color: color(markHex))
+            ThreadGlyph.draw(in: c, rect: box, color: color(markInk))
         }
     }
 
@@ -67,7 +68,7 @@ import AppKit
         <?xml version="1.0" encoding="UTF-8"?>
         <!-- Contexta Horizon: the canonical mark. Written by Icon/make-icon.swift from Sources/Glyph.swift. -->
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="\(box)" width="112" height="80">
-          \(ThreadGlyph.svgPath(stroke: markHex))
+          \(ThreadGlyph.svgPath(stroke: markInk))
         </svg>
 
         """, out.appendingPathComponent("mark.svg"))
@@ -76,9 +77,9 @@ import AppKit
         <!-- Contexta Horizon, Finder icon: the 112 by 112 tile (corner radius 25, the mark as an 87 by 72 SVG centred in it) inside the macOS icon margins. Written by Icon/make-icon.swift from Sources/Glyph.swift. -->
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
           <g transform="translate(100 100) scale(\(String(format: "%.9f", 824.0 / 112.0)))">
-            <rect width="112" height="112" rx="25" fill="\(plateHex)"/>
+            <rect width="112" height="112" rx="25" fill="\(indexYellow)"/>
             <svg x="12.5" y="20" width="87" height="72" viewBox="\(box)" preserveAspectRatio="xMidYMid meet">
-              \(ThreadGlyph.svgPath(stroke: markHex))
+              \(ThreadGlyph.svgPath(stroke: markInk))
             </svg>
           </g>
         </svg>

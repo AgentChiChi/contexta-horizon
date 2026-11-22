@@ -1,11 +1,11 @@
 # Resume your work in Aside
 
-**Optional integration for Contexta Horizon public preview v0.5.3 (build 10).** You can use Horizon with ChatGPT, Claude, or Aside without installing this skill: choose your own records in Horizon, review the preview, click **Copy**, and paste it into the conversation you choose. No provider account connection is required for that flow.
+**Optional integration for Contexta Horizon public preview v0.5.4 (build 11).** You can use Horizon with ChatGPT, Claude, or Aside without installing this skill: choose your own records in Horizon, review the preview, click **Copy**, and paste it into the conversation you choose. No provider account connection is required for that flow.
 
 ## Install the skill
 
-1. Install [Contexta Horizon v0.5.3](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.3) at `~/Applications/contexta-horizon.app`. The helper looks in your home Applications folder, not `/Applications`. Follow the [guide's installation and macOS safety steps](../../GUIDE.md#install-or-upgrade). Run `node --version`; if Node.js is missing, install a supported Node.js LTS release.
-2. Download [Horizon-Aside-skill.zip](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/Horizon-Aside-skill.zip). Compare its SHA-256 with the entry in [SHA256SUMS.txt](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.3/SHA256SUMS.txt) before extracting. Copy the `horizon-resume` folder into `skills/user` in the root of your active Aside account. Keep `SKILL.md` and `scripts/lookup.mjs` together in that folder, with no extra archive folder in between. Open a new Aside chat. To check installation without looking up your records, ask whether `horizon-resume` is available.
+1. Install [Contexta Horizon v0.5.4](https://github.com/AgentChiChi/contexta-horizon/releases/tag/v0.5.4) at `~/Applications/contexta-horizon.app`. The helper looks in your home Applications folder, not `/Applications`. Follow the [guide's installation and macOS safety steps](../../GUIDE.md#install-or-upgrade). Run `node --version`; if Node.js is missing, install a supported Node.js LTS release.
+2. Download [Horizon-Aside-skill.zip](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.4/Horizon-Aside-skill.zip). Compare its SHA-256 with the entry in [SHA256SUMS.txt](https://github.com/AgentChiChi/contexta-horizon/releases/download/v0.5.4/SHA256SUMS.txt) before extracting. Copy the `horizon-resume` folder into `skills/user` in the root of your active Aside account. Keep `SKILL.md` and `scripts/lookup.mjs` together in that folder, with no extra archive folder in between. Open a new Aside chat. To check installation without looking up your records, ask whether `horizon-resume` is available.
 
 You can inspect the [skill rules](horizon-resume/SKILL.md) and [local helper](horizon-resume/scripts/lookup.mjs) before installing.
 

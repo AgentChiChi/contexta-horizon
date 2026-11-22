@@ -1,4 +1,10 @@
-# Verifying Horizon 0.5.3 (build 10)
+# Verifying Horizon 0.5.4 (build 11)
+
+This is a Finder palette update, not a change in app behavior. The plate is Index Yellow (`#F4D447`) and the mark is dark ink (`#20231F`). The canonical path, corner radius, margins and menu template are unchanged. The generated icon is bundled as `Contents/Resources/AppIcon.icns`.
+
+The build passed 64/64 synthetic self-tests, 19/19 static checks and the fictional mailbox import check. The native app Swift sources and existing menu template assets were byte-identical to build 10. The new ten-representation Finder ICNS was decoded to verify the approved colors. No new model benchmark or live Mail test was run.
+
+## Previous release: 0.5.3 (build 10)
 
 **What changed:** one explicit Read Sources action, a responsive window while sources load, and the same -C- mark in Finder and the menu bar. Build 10 replaces build 9’s artwork without changing source-reading or Mail behavior.
 
